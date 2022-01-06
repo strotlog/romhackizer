@@ -130,6 +130,12 @@ function patch() {
             return -1
         }
     }
+    // per https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/vanilla_bugfixes.asm "fix morph ball in hidden chozo PLM",
+    // and confirmed at http://patrickjohnston.org/bank/84#fE3EF ,
+    // there is a vanilla bug in normally unused code.  picking up a hidden morph ball or a chozo morph ball will result in you getting spring ball instead (lol).
+    // this vanilla bug is not fixed in sm rotation (cause why would it be) so let's fix it here!
+    loadedroms['rotation'].allbytes[0x268CE] = 4 // moprh in chozo orb. 4=morph item-having bit. was 2=spring
+    loadedroms['rotation'].allbytes[0x26E02] = 4 // moprh in hidden aka shot block. 4=morph item-having bit. was 2=spring
     return 0
 }
 
