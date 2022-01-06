@@ -196,7 +196,7 @@ function updateState() {
     <p>This is not exactly a randomizer. Instead, it copies the locations of all the items from a <strong><a href="https://varia.run/">VARIA Randomizer</a></strong> ROM seed that you provide. (VARIA itself may include a rotation randomizer soon.)</p>
     <p>This:</p>
     <ul>
-        <li>Does not apply any code patches from the randomizer. It is exactly like SM: Rotation except the items are moved.</li>
+        <li>Does not apply any code patches from the randomizer. <!-- well, except the morph one --> It is exactly like SM: Rotation except the items are moved.</li>
         <li><strong>Does not ensure the seed is completable.</strong></li>
         <li>Will not show errors plainly yet - check your browser's console if a download link doesn't appear.</li>
         <li>Will not upload or store anything - it's all in your browser. (This means links generated are very temporary and local to this tab.)</li>
@@ -210,7 +210,7 @@ function updateState() {
     </div>
     <div id='divIdRotationRomArea' style='border: 1px; border-style: dotted' ondrop="event.preventDefault(); addRomFiles('rotation', event.dataTransfer.files)">
         <h3>Vanilla Rotation ROM</h3>
-        <input type='file' id='inputIdRotationRom' style='display:none' onchange="addRomFiles('rando', this.files)"/>
+        <input type='file' id='inputIdRotationRom' style='display:none' onchange="addRomFiles('rotation', this.files)"/>
         <input type='button' id='inputIdRotationRomButton' value='Browse' onclick="document.getElementById('inputIdRotationRom').click()"/>
         <span id='spanIdRotationRomFilename'>(No file)</span>
     </div>
