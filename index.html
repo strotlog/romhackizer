@@ -165,6 +165,7 @@ function patchmain() {
 
     // items are done. now do a select few code patches that make things suck less!
 
+
     // code patch (2): fix morph pickup bug
     // per https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/vanilla_bugfixes.asm "fix morph ball in hidden chozo PLM",
     // and confirmed at http://patrickjohnston.org/bank/84#fE3EF ,
@@ -236,15 +237,16 @@ function awakeningPatch() {
     // the instructions for this hack use free space at $8F:FF00 in varia rando (must be in bank $8f), we'll use the same (checking that it's not used first)
     // part 1: when entering construction zone from morph ball room ...
     // part 2: ... set zebes awake event bit. (does not affect the currently loaded/loading room, but effective thereafter)
+    // part 2b: ... and also set the door from construction zone (vanilla-right; rotation-bottom) from red to blue
     // part 3: when checking the state of pit room or top of morph elevator room, read the zebes awake flag directly
     //           (part 3 implementation choice: normally we'd just change the function pointer for the state-checking function, to point to the function that checks for a given event. done and done. but wait, that function requires 1 byte of space for a parameter (the "given event"), right after the function pointer, and the vanilla morph+missile checking function requires no parameter. so inserting that 1 byte for a parameter would require repointing a ton of stuff! so we overwrite the morph+missile state-checking function's contents instead.)
+    // part 4: maybe i need to rename this variable. anyway, this forces the BT fight as soon as you enter the room. needed since sm rotation always locks you in the room
     zebesAwakeningPatch = [{address: doorAsmRomAddressToModify, bytes: [0xff, 0x00].reverse()},
                            {address: 0x7ff00, bytes: [0xaf /* load  */, [0x7e, 0xd8, 0x20].reverse(),
-                                                      0x9 /* or */, [0x0, 0x1].reverse(),
+                                                      0x9 /* or */, [0x0, 0x1].reverse(), // set zebes awake event bit
                                                       0x8f /* store */, [0x7e, 0xd8, 0x20].reverse(),
-                                                      /* TODO: should probably move this next part cause it's gonna look weird when you see changing door colors */
                                                       0xaf /* load  */, [0x7e, 0xd8, 0xb6].reverse(),
-                                                      0x9, /* or */, [0x0, 0x4].reverse(),
+                                                      0x9, /* or */, [0x0, 0x4].reverse(), // set bit 4 (3rd bit) of 6th byte of the big door bitmask, ie this is the 51st (counting from 0: number 50 or 0x32) bit of doors. makes it blue
                                                       0x8f /* store */, [0x7e, 0xd8, 0xb6].reverse(),
                                                       0x60 /* return */,
                                                       ].flat()},
@@ -258,7 +260,11 @@ function awakeningPatch() {
                                                       // specify state header "room is alive"!
                                                       0xbd /* load A=*(X+0) */, 0x00, 0x00,
                                                       0xaa, /* tax (X=A) */
-                                                      0x4c, [0xe5, 0xe6].reverse()
+                                                      0x4c, [0xe5, 0xe6].reverse(),
+                                                      ].flat()},
+                           // modify "$84:D33B: wake bt if samus has bombs" from vanilla
+                           {address: 0x2533b, bytes: [0xa9 /* load immediate */, [0x00, 0x01].reverse(),
+                                                      0xea, 0xea, 0xea, /* NOP x3 */
                                                       ].flat()},
                            ]
     if (!(isAllFF(loadedroms['rotation'].allbytes, zebesAwakeningPatch[1].address, zebesAwakeningPatch[1].bytes.length))) {
@@ -331,7 +337,7 @@ function updateState() {
     <p>This is not exactly a randomizer. Instead, it copies the locations of all the items from a <strong><a href="https://varia.run/">VARIA Randomizer</a></strong> ROM seed that you provide. (VARIA itself may include a rotation randomizer soon.)</p>
     <p>This:</p>
     <ul>
-        <li>Applies only very <dfn title="1. TBD, 2. vanilla bug patch(es), 3. zebes always awakens & construction zone blue door, 4. balanced suits" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">minimal</dfn> code patches from the randomizer (the list may grow later). It is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
+        <li>Applies only very <dfn title="1. TBD; 2. vanilla bug patch(es);, 3. can always reach Taco tank room & BT's door, & fight BT; 4. balanced suits" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">minimal</dfn> code patches from the randomizer (the list may grow later). It is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
         <li><strong>Does not ensure the seed is completable.</strong></li>
         <li>Will not show errors plainly yet - check your browser's console if a download link doesn't appear.</li>
         <li>Will not upload or store anything - it's all in your browser. (This means links generated are very temporary and local to this tab.)</li>
