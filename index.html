@@ -30,6 +30,20 @@ function applyPatch(modifications) {
         }
     })
 }
+function checkForPatch(modifications) {
+    rets = modifications.map((modification) => {
+        for (i = 0; i < modification.bytes.length; i++) {
+            if (loadedroms['rotation'].allbytes[modification.address + i] !== modification.bytes[i]) {
+                return false
+            }
+        }
+        return true // this modification found
+    })
+    if (rets.includes(false)) {
+        return false
+    }
+    return true // all modifications found
+}
 function stringifyInHex(key, value) {
     if (typeof value === 'number') {
         return '0x' + value.toString(16)
@@ -228,26 +242,39 @@ function awakeningPatch() {
             }))
         for (i = 0; i < requireddestinations.length; i++) {
             if (!(doors.map((door) => door.dest)).includes(requireddestinations[i].smileid & 0xffff)) {
-                console.log('Error: Bailing, cannot confidently apply zebes awakening patch because ' + requireddestinations[i].roomname + ' not found in morph ball room\'s adjacent rooms in rotation rom. Doors found: ' + JSON.stringify(doors, stringifyInHex))
-                return -1
+                return { error: 'Error: Bailing, cannot confidently apply zebes awakening patch because ' + requireddestinations[i].roomname + ' not found in morph ball room\'s adjacent rooms in rotation rom. Doors found: ' + JSON.stringify(doors, stringifyInHex) }
             }
         }
+        doorToModifyIndex = -1
         for (i = 0; i < doors.length; i++) {
-            if (doors[i].doorasm !== 0) {
-                console.log('Error: At least one door in morph ball room in rotation rom, has door ASM already, cannot confidently apply zebes awakening patch. Doors found: ' + JSON.stringify(doors, stringifyInHex))
-                return -1
-            }
             if (doors[i].dest === (destinationToModify.smileid & 0xffff)) {
                 doorToModifyIndex = i
             }
+            if (doors[i].doorasm !== 0) {
+                if (doorToModifyIndex !== i) {
+                    return { error: 'Error: At least one door in morph ball room in rotation rom, has door ASM already, cannot confidently apply zebes awakening patch. Doors found: ' + JSON.stringify(doors, stringifyInHex) }
+                } else {
+                    // well, this is the door we want to modify, which has an asm. report a similar error *tentatively*, but allow checking whether the desired patch was already applied
+                    return { error: 'Error: The door we want to modify in morph ball room in rotation rom, has door ASM already. Cannot apply zebes awakening patch. Doors found: ' + JSON.stringify(doors, stringifyInHex),
+                             checkAlreadyPatched: (doors[i].thisDoorHeaderLocationInRom + 0xa )
+                            }
+                }
+            }
         }
 
-        return doors[doorToModifyIndex].thisDoorHeaderLocationInRom + 0xa
+        return { success: (doors[doorToModifyIndex].thisDoorHeaderLocationInRom + 0xa) }
     }
 
-    doorAsmRomAddressToModify = getDoorAsmAddressToModify() // should be 0x18eb4
-    if (doorAsmRomAddressToModify === -1) {
-        return -1
+    doorfinder = getDoorAsmAddressToModify()
+    if ('error' in doorfinder) {
+        if (!('checkAlreadyPatched' in doorfinder)) {
+            console.log(doorfinder['error'])
+            return -1
+        } else {
+            doorAsmRomAddressToModify = doorfinder['checkAlreadyPatched'] // should be 0x18eb4
+        }
+    } else {
+        doorAsmRomAddressToModify = doorfinder['success'] // should be 0x18eb4
     }
     
     // the instructions for this hack use free space at $8F:FF00 in varia rando (must be in bank $8f), we'll use the same (checking that it's not used first)
@@ -266,6 +293,7 @@ function awakeningPatch() {
                                                       0x8f /* store */, [0x7e, 0xd8, 0xb6].reverse(),
                                                       0x60 /* return */,
                                                       ].flat()},
+                           // modify "$8F:E652: Room state check: morphball and missiles" from vanilla
                            {address: 0x7e652, bytes: [0xaf /* load  */, [0x7e, 0xd8, 0x20].reverse(),
                                                       0x89 /* bit test A with constant */, [0x00, 0x01].reverse(),
                                                       0xd0 /* bne: branch if (test was) non-zero */, 0x3,
@@ -278,14 +306,28 @@ function awakeningPatch() {
                                                       0xaa, /* tax (X=A) */
                                                       0x4c, [0xe5, 0xe6].reverse(),
                                                       ].flat()},
-                           // modify "$84:D33B: wake bt if samus has bombs" from vanilla
+                           // modify "$84:D33B: wake PLM if Samus has bombs" from vanilla, which wakes bomb torizo (BT)
                            {address: 0x2533b, bytes: [0xa9 /* load immediate */, [0x00, 0x01].reverse(),
                                                       0xea, 0xea, 0xea, /* NOP x3 */
                                                       ].flat()},
                            ]
-    if (!(isAllFF(loadedroms['rotation'].allbytes, zebesAwakeningPatch[1].address, zebesAwakeningPatch[1].bytes.length))) {
-        console.log('Error: Code already exists in rotation rom at + 0x' + zebesAwakeningPatch[1].address.toString(16) + ', cannot write zebes awakening patch!')
-        return -1
+    if ('checkAlreadyPatched' in doorfinder) {
+        // allow us to process multiple rando roms in a single session!
+        if (!(checkForPatch([zebesAwakeningPatch[0], zebesAwakeningPatch[1]]))) {
+            // patch NOT found (at least not entirely), bail
+            if ('error' in doorfinder) {
+                console.log(doorfinder['error'])
+            } else {
+                console.log('checkAlreadyPatch requested and zebesAwakeningPatch [0] and/or [1] not detected in rotation rom')
+            }
+            return -1
+        }
+    } else {
+        // expecting a vanilla rotation rom, verify we can use free space
+        if (!(isAllFF(loadedroms['rotation'].allbytes, zebesAwakeningPatch[1].address, zebesAwakeningPatch[1].bytes.length))) {
+            console.log('Error: Code already exists in rotation rom at + 0x' + zebesAwakeningPatch[1].address.toString(16) + ', cannot write zebes awakening patch!')
+            return -1
+        }
     }
     if (zebesAwakeningPatch[2].bytes.length > 19) {
         console.log('Implementation error: patching ROM function $8F:E652 has space for only 19 bytes, but the one in this javascript code is ' + zebesAwakeningPatch[2].bytes.length + ' bytes long which does not fit!')
@@ -326,6 +368,7 @@ function updateState() {
         document.getElementById('spanIdRandoRomFilename').textContent = loadedroms['rando'].filename
     }
     if ('rotation' in loadedroms && 'rando' in loadedroms) {
+        document.getElementById('aIdDownloadLink').textContent = '' // remove link (if any previous one was shown)
         if (loadedroms['rotation'].allbytes.length < 2*1024*1024) {
             console.log('Rotation ROM provided is only ' + loadedroms['rotation'].allbytes.length + ' bytes, expected over ' + 3*1024*1024)
             return
