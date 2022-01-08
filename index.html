@@ -152,8 +152,14 @@ function patchmain() {
 
         // console.log(writeRotationAddress.toString(16) + ': wrote ' + loadedroms['rando'].allbytes[readRandoAddress].toString(16) + ' ' + loadedroms['rando'].allbytes[readRandoAddress+1].toString(16) + (readRandoAddress!==writeRotationAddress ? ' - read from ' + readRandoAddress.toString(16) : ''))
 
-        // check for race mode
         itemcopied = loadedroms['rando'].allbytes[readRandoAddress] + loadedroms['rando'].allbytes[readRandoAddress+1]*256 // convert plm from little endian
+        // check for 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
+        if (itemcopied === 0xbae9 || itemcopied === 0xbaed) {
+            // DO OVER - because the 'nothing item plm' does not exist in sm rotation, we have to use plm id 0xb62f "Don't make PLM" instead. equivalent except no shot blocks
+            loadedroms['rotation'].allbytes[writeRotationAddress] = 0x2f
+            loadedroms['rotation'].allbytes[writeRotationAddress+1] = 0xb6
+        }
+        // check for race mode
         if (itemcopied === 0xef03 || itemcopied === 0xef57 || itemcopied === 0xefab) {
             springballcount++
         }
@@ -188,51 +194,61 @@ function patchmain() {
 }
 
 function awakeningPatch() {
-    // all 3 real doors should be going to the rooms we think they are, and should have no door asm. just to be sure we're overwriting the right thing! this also makes us resilient to door repointing, and able to bail if rooms have been repointed
-    // morph ball room's header (0x79e9f) in bank $8f:
-    //     .(doors out arr pointer @ offset +9)
-    // doors out arr in bank $8f:
-    //     door 1 pointer - door to green hill zone (0x79e52) (points to door header for this door - door bank $83 is implied for door headers)
-    //     door 2 pointer - door to construction zone (0x79f11)
-    //     door 3 pointer - door to top of morph ball elevator room (0x797b5)
-    //     fake door 4 pointer 88FC - means end of list - dereference and find offset 0 is 0000
-    // door header in bank $83:
-    //     .(dest room pointer, a room header @ offset 0)
-    //     .(door asm pointer @ offset +0xa - bank $8f is implied for door asm code)
-    requireddestinations = [{smileid: 0x79e52, roomname: 'Green Hill Zone'},
-                            {smileid: 0x79f11, roomname: 'Construction Zone'},
-                            {smileid: 0x797b5, roomname: 'Top of Morph Ball Elevator Room'},
-                           ]
-    destinationToModify = requireddestinations[1] // Construction Zone
-    
-    // read all 3 doors
-    doorliststart = readUint16LE(loadedroms['rotation'].allbytes, 0x79e9f + 9)
-    doorliststart |= 0x70000 // prepare to read again from bank $8f
-    doors = [doorliststart, doorliststart+2, doorliststart+4].map(
-    
-        (doorlistentry) => readUint16LE(loadedroms['rotation'].allbytes, doorlistentry) | 0x10000 /* prepare to read from bank $83 */).map(
-    
-        (doorheader) => ({
-            dest:    readUint16LE(loadedroms['rotation'].allbytes, doorheader),
-            doorasm: readUint16LE(loadedroms['rotation'].allbytes, doorheader+0xa),
-            thisDoorHeaderLocationInRom: doorheader,
-        }))
-    for (i = 0; i < requireddestinations.length; i++) {
-        if (!(doors.map((door) => door.dest)).includes(requireddestinations[i].smileid & 0xffff)) {
-            console.log('Error: Bailing, cannot confidently apply zebes awakening patch because ' + requireddestinations[i].roomname + ' not found in morph ball room\'s adjacent rooms in rotation rom. Doors found: ' + JSON.stringify(doors, stringifyInHex))
-            return -1
+
+    // this rom-reading is very unlikely to be necessary, but it's fun. cordon off into sub-function
+    function getDoorAsmAddressToModify() {
+        // all 3 real doors should be going to the rooms we think they are, and should have no door asm. just to be sure we're overwriting the right thing! this also makes us resilient to door repointing, and able to bail if rooms have been repointed
+        // morph ball room's header (0x79e9f) in bank $8f:
+        //     .(doors out arr pointer @ offset +9)
+        // doors out arr in bank $8f:
+        //     door 1 pointer - door to green hill zone (0x79e52) (points to door header for this door - door bank $83 is implied for door headers)
+        //     door 2 pointer - door to construction zone (0x79f11)
+        //     door 3 pointer - door to top of morph ball elevator room (0x797b5)
+        //     fake door 4 pointer 88FC - means end of list - dereference and find offset 0 is 0000
+        // door header in bank $83:
+        //     .(dest room pointer, a room header @ offset 0)
+        //     .(door asm pointer @ offset +0xa - bank $8f is implied for door asm code)
+        requireddestinations = [{smileid: 0x79e52, roomname: 'Green Hill Zone'},
+                                {smileid: 0x79f11, roomname: 'Construction Zone'},
+                                {smileid: 0x797b5, roomname: 'Top of Morph Ball Elevator Room'},
+                               ]
+        destinationToModify = requireddestinations[1] // Construction Zone
+        
+        // read all 3 doors
+        doorliststart = readUint16LE(loadedroms['rotation'].allbytes, 0x79e9f + 9)
+        doorliststart |= 0x70000 // prepare to read again from bank $8f
+        doors = [doorliststart, doorliststart+2, doorliststart+4].map(
+        
+            (doorlistentry) => readUint16LE(loadedroms['rotation'].allbytes, doorlistentry) | 0x10000 /* prepare to read from bank $83 */).map(
+        
+            (doorheader) => ({
+                dest:    readUint16LE(loadedroms['rotation'].allbytes, doorheader),
+                doorasm: readUint16LE(loadedroms['rotation'].allbytes, doorheader+0xa),
+                thisDoorHeaderLocationInRom: doorheader,
+            }))
+        for (i = 0; i < requireddestinations.length; i++) {
+            if (!(doors.map((door) => door.dest)).includes(requireddestinations[i].smileid & 0xffff)) {
+                console.log('Error: Bailing, cannot confidently apply zebes awakening patch because ' + requireddestinations[i].roomname + ' not found in morph ball room\'s adjacent rooms in rotation rom. Doors found: ' + JSON.stringify(doors, stringifyInHex))
+                return -1
+            }
         }
+        for (i = 0; i < doors.length; i++) {
+            if (doors[i].doorasm !== 0) {
+                console.log('Error: At least one door in morph ball room in rotation rom, has door ASM already, cannot confidently apply zebes awakening patch. Doors found: ' + JSON.stringify(doors, stringifyInHex))
+                return -1
+            }
+            if (doors[i].dest === (destinationToModify.smileid & 0xffff)) {
+                doorToModifyIndex = i
+            }
+        }
+
+        return doors[doorToModifyIndex].thisDoorHeaderLocationInRom + 0xa
     }
-    for (i = 0; i < doors.length; i++) {
-        if (doors[i].doorasm != 0) {
-            console.log('Error: At least one door in morph ball room in rotation rom, has door ASM already, cannot confidently apply zebes awakening patch. Doors found: ' + JSON.stringify(doors, stringifyInHex))
-            return -1
-        }
-        if (doors[i].dest == (destinationToModify.smileid & 0xffff)) {
-            doorToModifyIndex = i
-        }
+
+    doorAsmRomAddressToModify = getDoorAsmAddressToModify() // should be 0x18eb4
+    if (doorAsmRomAddressToModify === -1) {
+        return -1
     }
-    doorAsmRomAddressToModify = doors[doorToModifyIndex].thisDoorHeaderLocationInRom + 0xa
     
     // the instructions for this hack use free space at $8F:FF00 in varia rando (must be in bank $8f), we'll use the same (checking that it's not used first)
     // part 1: when entering construction zone from morph ball room ...
