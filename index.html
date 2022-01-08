@@ -165,7 +165,6 @@ function patchmain() {
 
     // items are done. now do a select few code patches that make things suck less!
 
-
     // code patch (2): fix morph pickup bug
     // per https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/vanilla_bugfixes.asm "fix morph ball in hidden chozo PLM",
     // and confirmed at http://patrickjohnston.org/bank/84#fE3EF ,
@@ -232,19 +231,42 @@ function awakeningPatch() {
             doorToModifyIndex = i
         }
     }
-    console.log(JSON.stringify(doors, stringifyInHex))
     doorAsmRomAddressToModify = doors[doorToModifyIndex].thisDoorHeaderLocationInRom + 0xa
     
     // the instructions for this hack use free space at $8F:FF00 in varia rando (must be in bank $8f), we'll use the same (checking that it's not used first)
+    // part 1: when entering construction zone from morph ball room ...
+    // part 2: ... set zebes awake event bit. (does not affect the currently loaded/loading room, but effective thereafter)
+    // part 3: when checking the state of pit room or top of morph elevator room, read the zebes awake flag directly
+    //           (part 3 implementation choice: normally we'd just change the function pointer for the state-checking function, to point to the function that checks for a given event. done and done. but wait, that function requires 1 byte of space for a parameter (the "given event"), right after the function pointer, and the vanilla morph+missile checking function requires no parameter. so inserting that 1 byte for a parameter would require repointing a ton of stuff! so we overwrite the morph+missile state-checking function's contents instead.)
     zebesAwakeningPatch = [{address: doorAsmRomAddressToModify, bytes: [0xff, 0x00].reverse()},
                            {address: 0x7ff00, bytes: [0xaf /* load  */, [0x7e, 0xd8, 0x20].reverse(),
                                                       0x9 /* or */, [0x0, 0x1].reverse(),
                                                       0x8f /* store */, [0x7e, 0xd8, 0x20].reverse(),
+                                                      /* TODO: should probably move this next part cause it's gonna look weird when you see changing door colors */
+                                                      0xaf /* load  */, [0x7e, 0xd8, 0xb6].reverse(),
+                                                      0x9, /* or */, [0x0, 0x4].reverse(),
+                                                      0x8f /* store */, [0x7e, 0xd8, 0xb6].reverse(),
                                                       0x60 /* return */,
-                                                      ].flat()}
+                                                      ].flat()},
+                           {address: 0x7e652, bytes: [0xaf /* load  */, [0x7e, 0xd8, 0x20].reverse(),
+                                                      0x89 /* bit test A with constant */, [0x00, 0x01].reverse(),
+                                                      0xd0 /* bne: branch if (test was) non-zero */, 0x3,
+                                                      // fall back to default state - room is dead
+                                                      0xe8, /* increment X */
+                                                      0xe8, /* increment X - fully passed over the pointer to 2nd (room alive) room state header, register X now pointing to next function pointer (E5E6: default state handler) */
+                                                      0x60, /* return */
+                                                      // specify state header "room is alive"!
+                                                      0xbd /* load A=*(X+0) */, 0x00, 0x00,
+                                                      0xaa, /* tax (X=A) */
+                                                      0x4c, [0xe5, 0xe6].reverse()
+                                                      ].flat()},
                            ]
     if (!(isAllFF(loadedroms['rotation'].allbytes, zebesAwakeningPatch[1].address, zebesAwakeningPatch[1].bytes.length))) {
-        console.log('Error: Code already exists at + 0x' + zebesAwakeningPatch[1].address.toString(16) + ', cannot write zebes awakening patch!')
+        console.log('Error: Code already exists in rotation rom at + 0x' + zebesAwakeningPatch[1].address.toString(16) + ', cannot write zebes awakening patch!')
+        return -1
+    }
+    if (zebesAwakeningPatch[2].bytes.length > 19) {
+        console.log('Implementation error: patching ROM function $8F:E652 has space for only 19 bytes, but the one in this javascript code is ' + zebesAwakeningPatch[2].bytes.length + ' bytes long which does not fit!')
         return -1
     }
     
@@ -309,7 +331,7 @@ function updateState() {
     <p>This is not exactly a randomizer. Instead, it copies the locations of all the items from a <strong><a href="https://varia.run/">VARIA Randomizer</a></strong> ROM seed that you provide. (VARIA itself may include a rotation randomizer soon.)</p>
     <p>This:</p>
     <ul>
-        <li>Applies only very <dfn title="1. MSU, 2. vanilla bug patch(es), 3. zebes always awakens, 4. balanced suits" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">minimal</dfn> code patches from the randomizer (the list may grow later). It is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
+        <li>Applies only very <dfn title="1. TBD, 2. vanilla bug patch(es), 3. zebes always awakens & construction zone blue door, 4. balanced suits" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">minimal</dfn> code patches from the randomizer (the list may grow later). It is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
         <li><strong>Does not ensure the seed is completable.</strong></li>
         <li>Will not show errors plainly yet - check your browser's console if a download link doesn't appear.</li>
         <li>Will not upload or store anything - it's all in your browser. (This means links generated are very temporary and local to this tab.)</li>
