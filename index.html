@@ -328,7 +328,7 @@ function awakeningPatch() {
     
     zebesAwakeningPatch = [
                            // part 1: when samus enters construction zone from morph ball room, call (part 2)
-                           {address: doorAsmRomAddressToModify, type: 'overwrite'
+                           {address: doorAsmRomAddressToModify, type: 'overwrite',
                             bytes: [0xff, 0x00].reverse()},
                            // part 2: ... set zebes awake event bit. (does not affect the currently loaded/loading room, but effective thereafter)
                            // part 2b: ... and also set the door from construction zone (vanilla-right; rotation-bottom) from red to blue
