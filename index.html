@@ -12,16 +12,15 @@
 <script>
 
 // utilities
+function stringifyInHex(key, value) {
+    if (typeof value === 'number') {
+        return '0x' + value.toString(16)
+    } else {
+        return value
+    }
+}
 function readUint16LE(bytearr, address) {
     return bytearr[address] + 256*bytearr[address+1]
-}
-function isAllFF(bytearr, address, length) {
-    for (i = address; i < address+length; i++) {
-        if (bytearr[i] !== 0xff) {
-            return false
-        }
-    }
-    return true
 }
 function applyPatch(modifications) {
     modifications.forEach((modification) => {
@@ -44,12 +43,31 @@ function checkForPatch(modifications) {
     }
     return true // all modifications found
 }
-function stringifyInHex(key, value) {
-    if (typeof value === 'number') {
-        return '0x' + value.toString(16)
-    } else {
-        return value
+function checkForFreespaceConflict(modifications) {
+    rets = modifications.map((modification) => {
+        if (modification.type !== 'freespace') {
+            return false
+        }
+        for (i = modification.address; i < modification.bytes.length; i++) {
+            if (loadedroms['rotation'].allbytes[i] !== 0xff) {
+                // current copy of the rotation rom has code where freespace was expected
+                if (checkForPatch([modification])) {
+                    // no problem, the rotation rom already has exactly this patch
+                    // (as is the case when we rpocess multiple seeds in one session
+                    return false
+                } else {
+                    // not 0xff and not the exact same patch => a conflict
+                    console.log('patch beginning at 0x' + modification.address.toString(16) + ' length 0n' + modification.allbytes.length + ' which is intended for free space, conflicts with data found in the rotation rom')
+                    return true
+                }
+            }
+        }
+        return false
+    })
+    if (rets.includes(true)) {
+        return true
     }
+    return false // all modifications had no conflict
 }
 function checkForOverlappingPatches(modifications) {
     // turn each patch into 2 markers: one for where it begins, one for where it ends. then sort all the markers together and check for double-begins
@@ -230,31 +248,38 @@ function patchmain() {
     loadedroms['rotation'].allbytes[0x6e37d] = 0x01 // remove gravity's heat protection
     loadedroms['rotation'].allbytes[0x869dd] = 0x01 // replace the code where environmental damage calculation looks for gravity suit, with varia suit instead (in function $90:E9CE). gravity does nothing for enviro now
 
-    // cdoe patch (5): fix rotation bugs by strotlog
-    fixRotationBugs()
+    allOtherPatches = []
+
+    // code patch (5): fix rotation escape climb's PLM coordinates issues by strotlog
+    allOtherPatches = allOtherPatches.concat(fixEscapeClimb)
+
+    if (checkForOverlappingPatches(allOtherPatches)) {
+        return -1
+    }
+    if (checkForFreespaceConflict(allOtherPatches)) {
+        return -1
+    }
+    applyPatch(allOtherPatches)
 
     return 0
 }
 
-function fixRotationBugs() {
-    // SM rotation bug: rando softlock possible because bomb wall does not auto-break in climb room (room $796BA) during escape
-    // SM rotation didn't modify:
-    //   the setup ASM for this roomstate
-    //     - lives at $8f:91a9
-    //     - contains tile x and y coordinates, at $8f:91ad, for where to spawn the "hard-coded PLM" when you enter the room
-    //   the "pre-instruction" ASM for the code-spawned PLM
-    //     - lives at $84:b927
-    //     - does damage at the PLM's location only when samus is below and to the right of a pixel position that's hard-coded into the function
-    patches = [
-               {address: 0x791ad, type: 'overwrite',
-                bytes: [0x07, 0x10]}, // new (x, y) tile coordinate location of PLM. keep it in the bomb wall just like vanilla sm. moved 1px to the (new left) cause the whole thing doesn't blow up anymore due to who knows what
-               {address: 0x23928, type: 'overwrite',
-                bytes: [0x00, 0x00].reverse()}, // new X-pixel location of the trigger (X target=0 will always be satisfied)
-               {address: 0x2392d, type: 'overwrite',
-                bytes: [0x00, 0xd0].reverse()}, // new Y-pixel location of the trigger: $00d0. trigger on samus's center breaking a plane 2 tile heights above the top of the wall
-               ]
-    applyPatch(patches)
-}
+// SM rotation bug: rando softlock possible because bomb wall does not auto-break in climb room (room $796BA) during escape
+// SM rotation didn't modify:
+//   the setup ASM for this roomstate
+//     - lives at $8f:91a9
+//     - contains tile x and y coordinates, at $8f:91ad, for where to spawn the "hard-coded PLM" when you enter the room
+//   the "pre-instruction" ASM for the code-spawned PLM
+//     - lives at $84:b927
+//     - does damage at the PLM's location only when samus is below and to the right of a pixel position that's hard-coded into the function
+fixEscapeClimb = [
+    {address: 0x791ad, type: 'overwrite',
+     bytes: [0x07, 0x10]}, // new (x, y) tile coordinate location of PLM. keep it in the bomb wall just like vanilla sm. moved 1px to the (new left) cause the whole thing doesn't blow up anymore due to who knows what
+    {address: 0x23928, type: 'overwrite',
+     bytes: [0x00, 0x00].reverse()}, // new X-pixel location of the trigger (X target=0 will always be satisfied)
+    {address: 0x2392d, type: 'overwrite',
+     bytes: [0x00, 0xd0].reverse()}, // new Y-pixel location of the trigger: $00d0. trigger on samus's center breaking a plane 2 tile heights above the top of the wall
+    ]
 
 function awakeningPatch() {
 
@@ -378,15 +403,15 @@ function awakeningPatch() {
             }
             return -1
         }
-    } else {
-        // expecting a vanilla rotation rom, verify we can use free space
-        if (!(isAllFF(loadedroms['rotation'].allbytes, zebesAwakeningPatch[1].address, zebesAwakeningPatch[1].bytes.length))) {
-            console.log('Error: Code already exists in rotation rom at + 0x' + zebesAwakeningPatch[1].address.toString(16) + ', cannot write zebes awakening patch!')
-            return -1
-        }
     }
     if (zebesAwakeningPatch[2].bytes.length > 19) {
         console.log('Implementation error: patching ROM function $8F:E652 has space for only 19 bytes, but the one in this javascript code is ' + zebesAwakeningPatch[2].bytes.length + ' bytes long which does not fit!')
+        return -1
+    }
+    if (checkForOverlappingPatches(zebesAwakeningPatch)) {
+        return -1
+    }
+    if (checkForFreespaceConflict(zebesAwakeningPatch)) {
         return -1
     }
     
