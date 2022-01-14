@@ -267,21 +267,32 @@ function patchmain() {
     return 0
 }
 
-// SM rotation bug: rando softlock possible because bomb wall does not auto-break in climb room (room $796BA) during escape
-// SM rotation didn't modify:
+// SM rotation bug: rando softlock possible because bomb wall does not auto-break in climb room (room $796BA) during escape.
+// let's modify what SM rotation didn't modify:
 //   the setup ASM for this roomstate
 //     - lives at $8f:91a9
-//     - contains tile x and y coordinates, at $8f:91ad, for where to spawn the "hard-coded PLM" when you enter the room
+//     - contains tile x and y coordinates for where, upon entering room, to spawn a PLM with particular coordinates
+//       (who knows why deerforce made the PLM spawn using ASM. cause i assume it's equivalent to putting the PLM in the usual spot, the room state header's PLM set)
 //   the "pre-instruction" ASM for the code-spawned PLM
 //     - lives at $84:b927
 //     - does damage at the PLM's location only when samus is below and to the right of a pixel position that's hard-coded into the function
+//   the initialization AI ASM of the fake enemy projectile that gets spawned by the above PLM
+//     - lives in $86:b49d
+//     - hard-codes a position of a fake enemy projectile that visually pretends to cause the explosion (it's not necessary to fix this for functioning)
 fixEscapeClimb = [
+    // setup ASM hard-coded values modification:
     {address: 0x791ad, type: 'overwrite',
      bytes: [0x07, 0x10]}, // new (x, y) tile coordinate location of PLM. keep it in the bomb wall just like vanilla sm. moved 1px to the (new left) cause the whole thing doesn't blow up anymore due to who knows what
+    // pre-instruction ASM hard-coded values modification:
     {address: 0x23928, type: 'overwrite',
      bytes: [0x00, 0x00].reverse()}, // new X-pixel location of the trigger (X target=0 will always be satisfied)
     {address: 0x2392d, type: 'overwrite',
-     bytes: [0x00, 0xd0].reverse()}, // new Y-pixel location of the trigger: $00d0. trigger on samus's center breaking a plane 2 tile heights above the top of the wall
+     bytes: [0x00, 0xe0].reverse()}, // new Y-pixel location of the trigger: 0x00d0. trigger on samus's center breaking a plane 2 tile heights above the top of the wall
+    // projectile initialization AI ASM hard-coded values modification:
+    {address: 0x3349e, type: 'overwrite',
+     bytes: [0x00, 0x80].reverse()}, // new X-pixel location of the visual explosion graphic: 0x0080
+    {address: 0x334a7, type: 'overwrite',
+     bytes: [0x01, 0x00].reverse()}, // new Y-pixel location of the visual explosion graphic: 0x0100. pixel (0x0080, 0x0100) is tile (x=0x08, y=0x10) which puts the graphic right in the middle of the top row of the barrier in rotation, at least after screen shake
 ]
 
 // questionable solution because https://wiki.nesdev.org/w/index.php?title=Overscan
@@ -290,9 +301,9 @@ maxAmmoDisplay = [
     bytes: [
             // modify function "$80:9B44: Handle HUD tilemap (HUD routine when game is paused/running)" @ $80:9CAA
             0x80 /* bra */, 8, // skip the next 8 bytes, so that we can use them as jsl->jsr launchpads: very tiny functions which will let us call bank $80 local functions from within other code in other banks
-            0x20 /* jsr */, [0x9d, 0x78].reverse(), // thus we can use "jsl $80:9CAC" to be able to call $80:9D78: "Draw three HUD digits" 
+            0x20 /* jsr */, [0x9d, 0x78].reverse(), // thus we can use "jsl $80:9CAC" to be able to call $80:9D78: "Draw three HUD digits"
             0x6b /* rtl */,
-            0x20 /* jsr */, [0x9d, 0x98].reverse(), // thus we can use "jsl $80:9CB0" to be able to call $80:9D98: "Draw two HUD digits" 
+            0x20 /* jsr */, [0x9d, 0x98].reverse(), // thus we can use "jsl $80:9CB0" to be able to call $80:9D98: "Draw two HUD digits"
             0x6b /* rtl */,
 
             0x22 /* jsl */, [0x80, 0xd4, 0x00].reverse(), // long in case i need to repoint the main code (below) to live in a different bank than $80. (also why we have launchpads)
@@ -304,13 +315,13 @@ maxAmmoDisplay = [
              //   this is a wrapper function to ensure we always run the vanilla code without resorting to a jmp
              0x20 /* jsr */, [0xd4, 0x18].reverse(), // call $80:d418
              // vanilla code we overwrote
-             0xAE, 0x30, 0x03, // LDX $0330  
-             0xA9, 0xC0, 0x00, // LDA #$00C0 
-             0x95, 0xD0,       // STA $D0,x  
-             0xE8,             // INX        
-             0xE8,             // INX        
-             0xA9, 0x08, 0xC6, // LDA #$C608 
-             0x95, 0xD0,       // STA $D0,x  
+             0xAE, 0x30, 0x03, // LDX $0330
+             0xA9, 0xC0, 0x00, // LDA #$00C0
+             0x95, 0xD0,       // STA $D0,x
+             0xE8,             // INX
+             0xE8,             // INX
+             0xA9, 0x08, 0xC6, // LDA #$C608
+             0x95, 0xD0,       // STA $D0,x
              0x6b /* rtl return */,
              ].flat()},
     {address: 0x05418, type: 'freespace',
@@ -403,7 +414,7 @@ maxAmmoDisplay = [
              0x8d, [0x1f, 0x5e].reverse(),       // STA $1f5e
              0xaf, [0x7e, 0xc6, 0x4c].reverse(), // LDA $7e:c64c
              0x8d, [0x1f, 0x60].reverse(),       // STA $1f60
-             
+
                                                   //               ; Supers
              0xad, [0x09, 0xcc].reverse(),        //  LDA $09CC    ;\
              0xf0, 21,                            //  BEQ 0n21       ;>, If [Samus max super missiles] != 0:
@@ -414,7 +425,7 @@ maxAmmoDisplay = [
              0x8d, [0x1f, 0x64].reverse(),       // STA $1f64
              0xaf, [0x7e, 0xc6, 0x4a].reverse(), // LDA $7e:c64a
              0x8d, [0x1f, 0x66].reverse(),       // STA $1f66
-             
+
                                                   //               ; Power Bombs
              0xad, [0x09, 0xd0].reverse(),        //  LDA $09D0    ;\
              0xf0, 21,                            //  BEQ 0n21       ;>, If [Samus max power bombs] != 0:
@@ -536,14 +547,14 @@ function awakeningPatch() {
                                 {smileid: 0x797b5, roomname: 'Top of Morph Ball Elevator Room'},
                                ]
         destinationToModify = requireddestinations[1] // Construction Zone
-        
+
         // read all 3 doors
         doorliststart = readUint16LE(loadedroms['rotation'].allbytes, 0x79e9f + 9)
         doorliststart |= 0x70000 // prepare to read again from bank $8f
         doors = [doorliststart, doorliststart+2, doorliststart+4].map(
-        
+
             (doorlistentry) => readUint16LE(loadedroms['rotation'].allbytes, doorlistentry) | 0x10000 /* prepare to read from bank $83 */).map(
-        
+
             (doorheader) => ({
                 dest:    readUint16LE(loadedroms['rotation'].allbytes, doorheader),
                 doorasm: readUint16LE(loadedroms['rotation'].allbytes, doorheader+0xa),
@@ -585,7 +596,7 @@ function awakeningPatch() {
     } else {
         doorAsmRomAddressToModify = doorfinder['success'] // should be 0x18eb4
     }
-    
+
     zebesAwakeningPatch = [
                            // part 1: when samus enters construction zone from morph ball room, call (part 2)
                            {address: doorAsmRomAddressToModify, type: 'overwrite',
@@ -649,7 +660,7 @@ function awakeningPatch() {
     if (checkForFreespaceConflict(zebesAwakeningPatch)) {
         return -1
     }
-    
+
     applyPatch(zebesAwakeningPatch)
     return 0
 }
