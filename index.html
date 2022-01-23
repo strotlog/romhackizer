@@ -95,6 +95,7 @@ function checkForOverlappingPatches(modifications) {
     }
     return false
 }
+
 // generated this list of 100 item locations in the rotation rom (the right side numbers) by hand 2022/01/05. 96 of them are the same as vanilla, and 2 pairs are swapped
 rotationPlmAddressFromRando = {
 0x78264: 0x78264,
@@ -255,6 +256,9 @@ function patchmain() {
 
     // code patch (6): max ammo display by strotlog
     allOtherPatches = allOtherPatches.concat(maxAmmoDisplay)
+
+    // code patch (7): suit pickup softlock prevention by strotlog
+    allOtherPatches = allOtherPatches.concat(suitPickupsNowPreserveSamusLocation)
 
     if (checkForOverlappingPatches(allOtherPatches)) {
         return -1
@@ -527,6 +531,32 @@ maxAmmoDisplay = [
              ].flat()},
 ]
 
+// suit pickup position, a softlock prevention by strotlog
+// when she picks up gravity or varia suit, samus will now enter standing pose facing player as vanilla, but preserving the center of her X and Y position.
+// this is instead of being placed in the center of the screen (for which the vanilla game calculates where to move samus in the room position based on current scroll values).
+// still, kind of awkward because the expanding, full-screen graphical effect of samus powering up, a complex sequence of HDMA effects, is still centered in the middle of the
+// screen and therefore not on samus.
+suitPickupsNowPreserveSamusLocation = [
+    // modify function "$91:D4E4: Varia suit pick up"
+    // here we NOP out the vanilla writes (stores) to samus X pixel position, samus Y pixel position, samus previous X pixel position, samus previous Y pixel position
+    {address: 0x8d57d, type: 'overwrite',
+     bytes: [0xea, 0xea, 0xea, 0xea, 0xea, 0xea]},
+    {address: 0x8d58a, type: 'overwrite',
+     bytes: [0xea, 0xea, 0xea, 0xea, 0xea, 0xea]},
+    // modify function "$91:D5BA: Gravity suit pick up"
+    // same as previous above. we NOP out the vanilla writes (stores) to samus X pixel position, samus Y pixel position, samus previous X pixel position, samus previous Y pixel position
+    {address: 0x8d655, type: 'overwrite',
+     bytes: [0xea, 0xea, 0xea, 0xea, 0xea, 0xea]},
+    {address: 0x8d662, type: 'overwrite',
+     bytes: [0xea, 0xea, 0xea, 0xea, 0xea, 0xea]},
+    // modify function $91:E258 where the second instruction queues item room music track (aka elevator music aka track 3).
+    // NOP this instruction out. if we start item room music, it'd be too awkward if the next room loaded will have no track change (common) and keeps playing item room music.
+    //   - how we get here: function "$91:D4E4: Varia suit pick up" -> uses HDMA object $91:D5A2, which -> references pre-instruction function $88:E026, which -> contains and calls function pointer to function $91:E258 as its last callee at the end of the animation/cleanup.
+    //   - for some reason, this is not needed for gravity suit - at this point they differ only in that varia has this music instruction!
+    {address: 0x4625b, type: 'overwrite',
+     bytes: [0xea, 0xea, 0xea, 0xea]},
+]
+
 function awakeningPatch() {
 
     // this rom-reading is very unlikely to be necessary, but it's fun. cordon off into sub-function
@@ -723,7 +753,7 @@ function updateState() {
     <p>This is not exactly a randomizer. Instead, it copies the locations of all the items from a <strong><a href="https://varia.run/">VARIA Randomizer</a></strong> ROM seed that you provide. (VARIA itself may include a rotation randomizer soon.)</p>
     <p>This:</p>
     <ul>
-        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door, & fight BT; 4. balanced suits; 5. escape-climb softlock fix; 6. max ammo equip screen" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
+        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door, & fight BT; 4. balanced suits; 5. escape-climb softlock fix; 6. max ammo equip screen; 7. suit pickup stands samus in-place" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
         <li><strong>Does not ensure the seed is completable.</strong></li>
         <li>Will not show errors plainly yet - check your browser's console if a download link doesn't appear.</li>
         <li>Will not upload or store anything - it's all in your browser. (This means links generated are very temporary and local to this tab.)</li>
