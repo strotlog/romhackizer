@@ -95,6 +95,38 @@ function checkForOverlappingPatches(modifications) {
     }
     return false
 }
+function assembleUnambiguousInstructions(modifications) {
+    ret = modifications.map(function (modification) {
+        modification.bytes = modification.bytes.map(function (byteOrOpcode) {
+            if (typeof byteOrOpcode !== 'string') {
+                return byteOrOpcode
+            }
+            if (byteOrOpcode.toUpperCase() in unambiguousInstructionMapping) {
+                return unambiguousInstructionMapping[byteOrOpcode.toUpperCase()]
+            }
+            console.log('patch beginning at 0x' + modification.address.toString(16) + ' contains the opcode \'' + byteOrOpcode + '\', which does not exist OR is ambiguous (context-dependent opcodes like LDA are not supported yet)')
+            return 'error'
+        });
+        if (modification.bytes.includes('error')) {
+            return 'error'
+        }
+        return modification
+    });
+    if (ret.includes('error')) {
+        return []
+    }
+    return ret
+}
+unambiguousInstructionMapping = {
+'INY': 0xC8, 'INX': 0xE8, 'DEY': 0x88, 'DEX': 0xCA, 'BPL': 0x10, 'BMI': 0x30, 'BVC': 0x50, 'BVS': 0x70,
+'BRA': 0x80, 'BRL': 0x82, 'BCC': 0x90, 'BCS': 0xB0, 'BNE': 0xD0, 'BEQ': 0xF0, 'JSL': 0x22, 'RTS': 0x60,
+'RTL': 0x6B, 'CLC': 0x18, 'SEC': 0x38, 'CLI': 0x58, 'SEI': 0x78, 'CLV': 0xB8, 'CLD': 0xD8, 'SED': 0xF8,
+'TCS': 0x1B, 'TSC': 0x3B, 'TCD': 0x5B, 'TDC': 0x7B, 'TXA': 0x8A, 'TYA': 0x98, 'TXS': 0x9A, 'TXY': 0x9B,
+'TAY': 0xA8, 'TAX': 0xAA, 'TSX': 0xBA, 'TYX': 0xBB, 'MVP': 0x44, 'MVN': 0x54, 'PER': 0x62, 'PEI': 0xD4,
+'PEA': 0xF4, 'PHP': 0x08, 'PHD': 0x0B, 'PHA': 0x48, 'PHK': 0x4B, 'PHY': 0x5A, 'PHB': 0x8B, 'PHX': 0xDA,
+'PLP': 0x28, 'PLD': 0x2B, 'PLA': 0x68, 'PLY': 0x7A, 'PLB': 0xAB, 'PLX': 0xFA, 'NOP': 0xEA, 'REP': 0xC2,
+'SEP': 0xE2, 'XBA': 0xEB, 'XCE': 0xFB, 'BRK': 0x00, 'COP': 0x02, 'RTI': 0x40, 'WAI': 0xCB, 'STP': 0xDB,
+}
 
 // generated this list of 100 item locations in the rotation rom (the right side numbers) by hand 2022/01/05. 96 of them are the same as vanilla, and 2 pairs are swapped
 rotationPlmAddressFromRando = {
@@ -266,6 +298,10 @@ function patchmain() {
     if (checkForFreespaceConflict(allOtherPatches)) {
         return -1
     }
+    allOtherPatches = assembleUnambiguousInstructions(allOtherPatches)
+    if (allOtherPatches.length === 0) {
+        return -1
+    }
     applyPatch(allOtherPatches)
 
     return 0
@@ -304,14 +340,14 @@ maxAmmoDisplay = [
     {address: 0x01caa, type: 'overwrite',
     bytes: [
             // modify function "$80:9B44: Handle HUD tilemap (HUD routine when game is paused/running)" @ $80:9CAA
-            0x80 /* bra */, 8, // skip the next 8 bytes, so that we can use them as jsl->jsr launchpads: very tiny functions which will let us call bank $80 local functions from within other code in other banks
+            'bra', 8, // skip the next 8 bytes, so that we can use them as jsl->jsr launchpads: very tiny functions which will let us call bank $80 local functions from within other code in other banks
             0x20 /* jsr */, [0x9d, 0x78].reverse(), // thus we can use "jsl $80:9CAC" to be able to call $80:9D78: "Draw three HUD digits"
-            0x6b /* rtl */,
+            'rtl',
             0x20 /* jsr */, [0x9d, 0x98].reverse(), // thus we can use "jsl $80:9CB0" to be able to call $80:9D98: "Draw two HUD digits"
-            0x6b /* rtl */,
+            'rtl',
 
-            0x22 /* jsl */, [0x80, 0xd4, 0x00].reverse(), // long in case i need to repoint the main code (below) to live in a different bank than $80. (also why we have launchpads)
-            0xea, /* NOP */ // to avoid overwriting only half an instruction
+            'jsl', [0x80, 0xd4, 0x00].reverse(), // long in case i need to repoint the main code (below) to live in a different bank than $80. (also why we have launchpads)
+            'nop', // to avoid overwriting only half an instruction
             ].flat()},
     {address: 0x05400, type: 'freespace',
      bytes: [
@@ -326,7 +362,7 @@ maxAmmoDisplay = [
              0xE8,             // INX
              0xA9, 0x08, 0xC6, // LDA #$C608
              0x95, 0xD0,       // STA $D0,x
-             0x6b /* rtl return */,
+             'rtl', // return
              ].flat()},
     {address: 0x05418, type: 'freespace',
      bytes: [
@@ -339,33 +375,33 @@ maxAmmoDisplay = [
              0xad /* lda load */, [0x09, 0x98].reverse(), // load $0998 : game state
              0x29 /* and imm */, [0x00, 0xff].reverse(), // low byte only
              0xc9 /* cmp */, [0x00, 0x08].reverse(), // $0998 (game state) == 0x8 (main gameplay)?
-             0xd0 /* bne */, 1, // skip rts if not equal
-             0x60 /* rts return */, // return first thing if we're in main gameplay!
+             'bne', 1, // skip rts if not equal
+             'rts', // return first thing if we're in main gameplay!
 
              0xc9 /* cmp */, [0x00, 0x11].reverse(), // $0998 (game state) == 0x11 (exiting pause)?
-             0xd0 /* bne */, 4, // skip jsl:rts if not equal
+             'bne', 4, // skip jsr:rts if not equal
              0x20 /* jsr */, [0xd5, 0x28].reverse(), // 0x11 (exiting pause) => call $80:d528 (check if we need to do cleanup and do so)
-             0x60 /* rts */, // return after calling the cleanup check
+             'rts', // return after calling the cleanup check
 
              0xc9 /* cmp */, [0x00, 0x12].reverse(), // $0998 (game state) == 0x12 (exiting pause v2)?
-             0xd0 /* bne */, 4, // skip jsl:rts if not equal
+             'bne', 4, // skip jsr:rts if not equal
              0x20 /* jsr */, [0xd5, 0x28].reverse(), // 0x12 (exiting pause v2) => call $80:d528 (check if we need to do cleanup and do so)
-             0x60 /* rts */, // return after calling the cleanup check
+             'rts', // return after calling the cleanup check
 
              0xc9 /* cmp */, [0x00, 0x0f].reverse(), // $0998 (game state) == 0xf (paused)?
-             0xf0 /* beq branch if equal */, 1, // skip rts if yes (equal)
-             0x60 /* rts return */, // return if not paused
+             'beq' /* branch if equal */, 1, // skip rts if yes (equal)
+             'rts', // return if not paused
              // yes we are paused:
 
              0xad /* lda load */, [0x07, 0x27].reverse(), // load $0727 : pause screen state aka pause index.
              0xc9 /* cmp */, [0x00, 0x06].reverse(), // $0727 (pause screen state) == 6 (loading the map screen after having shown equipment screen)? we probably only get called once in this state this which is cool)
-             0xd0 /* bne */, 4, // skip jsl:rts if not equal
+             'bne', 4, // skip jsr:rts if not equal
              0x20 /* jsr */, [0xd5, 0x28].reverse(), // 6 (loading the map screen after having shown equipment screen) => call $80:d528 (check if we need to do cleanup and do so)
-             0x60 /* rts */, // return after calling the cleanup check
+             'rts', // return after calling the cleanup check
 
              0xc9 /* cmp */, [0x00, 0x03].reverse(), // $0727 (pause screen state) == 3 (loading the equipment screen)? we probably only get called once in this state this which is cool)
-             0xf0 /* beq */, 1, // skip rts if equal
-             0x60 /* rts return */, // return if not deep in a transition between pause screens
+             'beq', 1, // skip rts if equal
+             'rts', // return if not deep in a transition between pause screens
 
              // we are paused and on the equipment screen (pause screen state 1, 4, or 5)! do the thing! (draw max ammos - we'll do it kind of the way $80:9B44 draws current ammos)
 
@@ -376,18 +412,18 @@ maxAmmoDisplay = [
              //      - we'll verify there's enough room in the stack first. i don't really care if it gets clobbered, it's just graphics. but let's be careful not to overwrite our own return address with gfx!
              // VRAM: then we'll queue a DMA from there to VRAM $580A..5813 (sub-section of the blank/unused top row, $5800-$5820)
 
-             0xba, /* tsx ie set X=S */
+             'tsx', /* tsx ie set X=S */
              0xe0, /* cpx compare X to imm */, [0x1F, 0x8E].reverse(), // $7E:1F6E end of the space we want + 0x20 bytes for function calls and interrupts = $7E:1F8E
-             0xb0, /* bcs branch if the result was positive or 0 */, 1, // if enough stack space, skip rts
-             0x60 /* rts return */, // if not enough stack space, return
+             'bcs', /* branch-(if)-carry-set, branch if the result was positive or 0 */, 1, // if enough stack space, skip rts
+             'rts', // if not enough stack space, return
 
              // write blank tiles to the initial tile data before we write digit tiles over some of this memory, so everything starts at a valid default
-             0x5a, // PHY push Y register
-             0xa9, [0x2c, 0x0f].reverse(),       // LDA #$2c0f (blank tile type)
-             0xa2, [0x1f, 0x5c].reverse(),       // LDX #$1f5c (starting address of (misappropriated) top of stack area)
-             0xa0, [0x00, 0x12].reverse(),       // LDY #$0012 (0x12=0n18=2 bytes for each of the 9 2c0f's to write at $1f5c)
-             0x22, [0x80, 0x83, 0xf6].reverse(), // JSL $80:83F6 ; Write [Y] bytes of [A] to $7E:0000 + [X] - 16-bit
-             0x7a, // PLY pull Y register
+             'phy', // push Y register
+             0xa9,  [0x2c, 0x0f].reverse(),       // LDA #$2c0f (blank tile type)
+             0xa2,  [0x1f, 0x5c].reverse(),       // LDX #$1f5c (starting address of (misappropriated) top of stack area)
+             0xa0,  [0x00, 0x12].reverse(),       // LDY #$0012 (0x12=0n18=2 bytes for each of the 9 2c0f's to write at $1f5c)
+             'jsl', [0x80, 0x83, 0xf6].reverse(), // JSL $80:83F6 ; Write [Y] bytes of [A] to $7E:0000 + [X] - 16-bit
+             'ply', // pull to Y register
 
              // create initial tile data at $7E:1F5C..1F6E
              // the callees can only write to addresses higher than $C608 (yeah, i tried wrapping the bank, it went into bank $7f instead) sigh. so:
@@ -408,9 +444,9 @@ maxAmmoDisplay = [
              // (2) & (3), repeated for each ammo type:
                                                   //               ; Missiles
              0xad, [0x09, 0xc8].reverse(),        //  LDA $09C8    ;\
-             0xf0, 28,                            //  BEQ 0n28       ;>, If [Samus max missiles] != 0:
+             'beq', 28,                           //  BEQ 0n28       ;>, If [Samus max missiles] != 0:
              0xa2, [0x00, 0x40].reverse(),        //  LDX #$0040   ; X = missile count HUD tilemap destination offset
-             0x22, [0x80, 0x9c, 0xac].reverse(),  //  JSL $80:9CAC ; Draw three HUD digits
+             'jsl', [0x80, 0x9c, 0xac].reverse(), //  JSL $80:9CAC ; Draw three HUD digits
 
              0xaf, [0x7e, 0xc6, 0x48].reverse(), // LDA $7e:c648
              0x8d, [0x1f, 0x5c].reverse(),       // STA $1f5c
@@ -421,9 +457,9 @@ maxAmmoDisplay = [
 
                                                   //               ; Supers
              0xad, [0x09, 0xcc].reverse(),        //  LDA $09CC    ;\
-             0xf0, 21,                            //  BEQ 0n21       ;>, If [Samus max super missiles] != 0:
+             'beq', 21,                           //  BEQ 0n21       ;>, If [Samus max super missiles] != 0:
              0xa2, [0x00, 0x40].reverse(),        //  LDX #$0040   ; X = super missile count HUD tilemap destination offset
-             0x22, [0x80, 0x9c, 0xb0].reverse(),  //  JSL $80:9CB0 ; Draw two HUD digits
+             'jsl', [0x80, 0x9c, 0xb0].reverse(), //  JSL $80:9CB0 ; Draw two HUD digits
 
              0xaf, [0x7e, 0xc6, 0x48].reverse(), // LDA $7e:c648
              0x8d, [0x1f, 0x64].reverse(),       // STA $1f64
@@ -432,9 +468,9 @@ maxAmmoDisplay = [
 
                                                   //               ; Power Bombs
              0xad, [0x09, 0xd0].reverse(),        //  LDA $09D0    ;\
-             0xf0, 21,                            //  BEQ 0n21       ;>, If [Samus max power bombs] != 0:
+             'beq', 21,                           //  BEQ 0n21       ;>, If [Samus max power bombs] != 0:
              0xa2, [0x00, 0x40].reverse(),        //  LDX #$0040   ; X = power bomb count HUD tilemap destination offset
-             0x22, [0x80, 0x9c, 0xb0].reverse(),  //  JSL $80:9CB0 ; Draw two HUD digits
+             'jsl', [0x80, 0x9c, 0xb0].reverse(), //  JSL $80:9CB0 ; Draw two HUD digits
 
              0xaf, [0x7e, 0xc6, 0x48].reverse(), // LDA $7e:c648
              0x8d, [0x1f, 0x6a].reverse(),       // STA $1f6a
@@ -451,7 +487,7 @@ maxAmmoDisplay = [
 
              // finish up by queuing the DMA!
              0x20 /* jsr */, [0xd4, 0xf8].reverse(), // call $80:d4f8
-             0x60 /* rts return */,
+             'rts', // return
              ].flat()},
     {address: 0x054f8, type: 'freespace',
      bytes: [
@@ -461,22 +497,22 @@ maxAmmoDisplay = [
              0xAE, [0x03, 0x30].reverse(), // LDX $0330  [$7E:0330]  ;\
              0xA9, [0x00, 0x12].reverse(), // LDA #$0012             ;| // length in source (18 bytes)
              0x95, 0xD0,                   // STA $D0,x  [$7E:00D0]  ;|
-             0xE8,                         // INX                    ;|
-             0xE8,                         // INX                    ;|
+             'inx',                        // INX                    ;|
+             'inx',                        // INX                    ;|
              0xA9, [0x1F, 0x5C].reverse(), // LDA #$1F5C             ;|
              0x95, 0xD0,                   // STA $D0,x  [$7E:00D2]  ;|
-             0xE8,                         // INX                    ;|
-             0xE8,                         // INX                    ;> Queue transfer of $7E:1F5C..6E to VRAM $580A..5813 (part of top row of HUD tilemap)
+             'inx',                        // INX                    ;|
+             'inx',                        // INX                    ;> Queue transfer of $7E:1F5C..6E to VRAM $580A..5813 (part of top row of HUD tilemap)
              0xA9, [0x00, 0x7E].reverse(), // LDA #$007E             ;|
              0x95, 0xD0,                   // STA $D0,x  [$7E:00D4]  ;|
-             0xE8,                         // INX                    ;|
+             'inx',                        // INX                    ;|
              0xA9, [0x58, 0x0A].reverse(), // LDA #$580A             ;|
              0x95, 0xD0,                   // STA $D0,x  [$7E:00D5]  ;|
-             0xE8,                         // INX                    ;|
-             0xE8,                         // INX                    ;|
+             'inx',                        // INX                    ;|
+             'inx',                        // INX                    ;|
              0x8E, [0x03, 0x30].reverse(), // STX $0330  [$7E:0330]  ;/
 
-             0x60 /* rts return */,
+             'rts', // return
 
              ].flat()},
     {address: 0x05528, type: 'freespace',
@@ -484,15 +520,14 @@ maxAmmoDisplay = [
              // new code at $80:d528:
              //     check for cleanup needed & perform cleanup if so (normally would call this when equipment screen has faded to black)
              0xad /* lda */, [0x1f, 0x62].reverse(), // LDA $1f62
-             0xc9 /* cmp */, [0x2c, 0x0f].reverse(), // is our blank tile chilling here at the (misappropriated) top of the stack area?
-             0xf0 /* beq branch if equal */, 1, // skip rts if yes (equal)
-             0x60 /* rts return */, // return if blank tile's tile number wasn't what was there
+             0xc9 /* cmp imm */, [0x2c, 0x0f].reverse(), // is our blank tile chilling here at the (misappropriated) top of the stack area?
+             'beq', 1, // branch-if-equal: skip rts if blank found (equal)
+             'rts', // return if blank tile's tile number wasn't what was there
 
              0xad /* lda */, [0x1f, 0x68].reverse(), // LDA $1f68 (lower expected blank in stack, this one is between super and pb max ammo)
-             0xc9 /* cmp */, [0x2c, 0x0f].reverse(), // is our blank tile chilling here at the (misappropriated) top of the stack area?
-             0xf0 /* beq branch if equal */, 1, // skip rts if yes (equal)
-
-             0x60 /* rts return */, // return if blank tile tile number wasn't what was there
+             0xc9 /* cmp imm */, [0x2c, 0x0f].reverse(), // is our blank tile chilling here at the (misappropriated) top of the stack area?
+             'beq', 1, // branch-if-equal: skip rts if blank found (equal)
+             'rts', // return if blank tile tile number wasn't what was there
 
              // still, we want to bail and not repeat a DMA if this routine already ran and blanked and DMA'ed everything
              // to do this, we bail if no digits are detected in the (misappropriated) top of the stack area
@@ -517,16 +552,16 @@ maxAmmoDisplay = [
              //0x60 /* rts */, // return because we didn't find the remnants of an intermediate copy of an actual digit 0-9
 
              // put blanks over the intermediate copy of each max ammo count tile (like memset)
-             0x5a, // PHY push Y register
+             'phy', // push Y register
              0xa9, [0x2c, 0x0f].reverse(),       // LDA #$2c0f (blank tile type)
              0xa2, [0x1f, 0x5c].reverse(),       // LDX #$1f5c (starting address of (misappropriated) top of stack area)
              0xa0, [0x00, 0x12].reverse(),       // LDY #$0012 (0x12=0n18=2 bytes for each of the 9 2c0f's to write at $1f5c)
-             0x22, [0x80, 0x83, 0xf6].reverse(), // JSL $80:83F6 ; Write [Y] bytes of [A] to $7E:0000 + [X] - 16-bit
-             0x7a, // PLY pull Y register
+             'jsl', [0x80, 0x83, 0xf6].reverse(), // JSL $80:83F6 ; Write [Y] bytes of [A] to $7E:0000 + [X] - 16-bit
+             'ply', // pull to Y register
 
              // queue DMA to copy said blanks back onto the real HUD in VRAM
              0x20 /* jsr */, [0xd4, 0xf8].reverse(), // call $80:d4f8
-             0x60 /* rts return */,
+             'rts', // return
 
              ].flat()},
 ]
@@ -540,21 +575,21 @@ suitPickupsNowPreserveSamusLocation = [
     // modify function "$91:D4E4: Varia suit pick up"
     // here we NOP out the vanilla writes (stores) to samus X pixel position, samus Y pixel position, samus previous X pixel position, samus previous Y pixel position
     {address: 0x8d57d, type: 'overwrite',
-     bytes: [0xea, 0xea, 0xea, 0xea, 0xea, 0xea]},
+     bytes: ['nop', 'nop', 'nop', 'nop', 'nop', 'nop']},
     {address: 0x8d58a, type: 'overwrite',
-     bytes: [0xea, 0xea, 0xea, 0xea, 0xea, 0xea]},
+     bytes: ['nop', 'nop', 'nop', 'nop', 'nop', 'nop']},
     // modify function "$91:D5BA: Gravity suit pick up"
     // same as previous above. we NOP out the vanilla writes (stores) to samus X pixel position, samus Y pixel position, samus previous X pixel position, samus previous Y pixel position
     {address: 0x8d655, type: 'overwrite',
-     bytes: [0xea, 0xea, 0xea, 0xea, 0xea, 0xea]},
+     bytes: ['nop', 'nop', 'nop', 'nop', 'nop', 'nop']},
     {address: 0x8d662, type: 'overwrite',
-     bytes: [0xea, 0xea, 0xea, 0xea, 0xea, 0xea]},
+     bytes: ['nop', 'nop', 'nop', 'nop', 'nop', 'nop']},
     // modify function $91:E258 where the second instruction queues item room music track (aka elevator music aka track 3).
     // NOP this instruction out. if we start item room music, it'd be too awkward if the next room loaded will have no track change (common) and keeps playing item room music.
     //   - how we get here: function "$91:D4E4: Varia suit pick up" -> uses HDMA object $91:D5A2, which -> references pre-instruction function $88:E026, which -> contains and calls function pointer to function $91:E258 as its last callee at the end of the animation/cleanup.
     //   - for some reason, this is not needed for gravity suit - at this point they differ only in that varia has this music instruction!
     {address: 0x4625b, type: 'overwrite',
-     bytes: [0xea, 0xea, 0xea, 0xea]},
+     bytes: ['nop', 'nop', 'nop', 'nop']},
 ]
 
 function awakeningPatch() {
@@ -649,23 +684,23 @@ function awakeningPatch() {
                            {address: 0x7e652, type: 'overwrite',
                             bytes: [0xaf /* load  */, [0x7e, 0xd8, 0x20].reverse(),
                                     0x89 /* bit test A with constant */, [0x00, 0x01].reverse(),
-                                    0xd0 /* bne: branch if (test was) non-zero */, 0x3,
+                                    'bne', 3, // branch-(if)-not-equal-(to-zero): branch if a matching 1 bit was found
                                     // fall back to default state - room is dead
-                                    0xe8, /* increment X */
-                                    0xe8, /* increment X - fully passed over the pointer to 2nd (room alive) room state header, register X now pointing to next function pointer (E5E6: default state handler) */
-                                    0x60, /* rts return */
+                                    'inx', // X++
+                                    'inx', // X++ - fully passed over the pointer to 2nd (room alive) room state header, register X now pointing to next function pointer (E5E6: default state handler)
+                                    'rts', // return
                                     // specify state header "room is alive"!
                                     0xbd /* load A=*(X+0) */, 0x00, 0x00,
-                                    0xaa, /* tax (X=A) */
-                                    0x4c, [0xe5, 0xe6].reverse(),
+                                    'tax', /* X=A */
+                                    0x4c /* jmp */, [0xe5, 0xe6].reverse(),
                                     ].flat()},
                            // part 4: force the BT fight as soon as samus enters the room. (sm rotation always locks you in the room, beating bt unlocks the door.)
                            // modify "$84:D33B: wake PLM if Samus has bombs" from vanilla, which wakes bomb torizo (BT)
                            // random note, this patch is sufficient for rotation but wouldn't be for vanilla. rotation replaced the very custom door in the room with a generic gray door, which always closes.
                            {address: 0x2533b, type: 'freespace',
-                            bytes: [0xea, 0xea, 0xea, // remove the "If Samus doesn't have bombs" branch
-                                    0xea, 0xea, 0xea, // for the crumbling chozo,
-                                    0xea, 0xea,       // using NOP x8
+                            bytes: ['nop', 'nop', 'nop', // remove the "If Samus doesn't have bombs" branch
+                                    'nop', 'nop', 'nop', // for the crumbling chozo,
+                                    'nop', 'nop',        // using NOP x8
                                     ].flat()},
                            ]
     if ('checkAlreadyPatched' in doorfinder) {
@@ -691,6 +726,10 @@ function awakeningPatch() {
         return -1
     }
 
+    zebesAwakeningPatch = assembleUnambiguousInstructions(zebesAwakeningPatch)
+    if (zebesAwakeningPatch.length === 0) {
+        return -1
+    }
     applyPatch(zebesAwakeningPatch)
     return 0
 }
