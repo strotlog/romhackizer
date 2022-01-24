@@ -531,25 +531,24 @@ maxAmmoDisplay = [
 
              // still, we want to bail and not repeat a DMA if this routine already ran and blanked and DMA'ed everything
              // to do this, we bail if no digits are detected in the (misappropriated) top of the stack area
-             //0xad /* lda */, [0x1f, 0x60].reverse(), // LDA $1f60 - lowest digit of max missile count in the (misappropriated) top of the stack area
-             //0xc9 /* cmp */, [0x2c, 0x00].reverse(), // [$1f60] < #$2c00 ? skip to checking super count
-             //0x90 /* bcc - branch if carry clear ie if ([$1f60] - #$2c00) was negative */, 5,
-             //0xc9 /* cmp */, [0x2c, 0x0a].reverse(), // [$1f60] < #$2c0a ? then we have a digit! -> perform cleanup
-             //0x90 /* bcc - branch if carry clear ie if ([$1f60] - #$2c0a) was negative */, 27,
+             0xad /* lda */, [0x1f, 0x60].reverse(), // LDA $1f60 - lowest digit of max missile count in the (misappropriated) top of the stack area
+             'sec',
+             0xe9 /* sbc imm */, [0x2c, 0x00].reverse(), // SEC : SBC #$2c00 . ie, subtract 0x2c00. we wanted to find the tiles that display 0-9, of value 2c00-2c09, now we can check for <= 09 (< 0xa)
+             0xc9 /* cmp imm */, [0x00, 0x0a].reverse(),
+             'bmi', 25, // branch-(if)-minus ie if we found a digit. no need to check supers or pbs
 
-             //0xad /* lda */, [0x1f, 0x66].reverse(), // LDA $1f66 - lowest digit of max super count in the (misappropriated) top of the stack area
-             //0xc9 /* cmp */, [0x2c, 0x00].reverse(), // [$1f66] < #$2c00 ? skip to checking pb count
-             //0x90 /* bcc - branch if carry clear ie if ([$1f66] - #$2c00) was negative */, 5,
-             //0xc9 /* cmp */, [0x2c, 0x0a].reverse(), // [$1f66] < #$2c0a ? then we have a digit! -> perform cleanup
-             //0x90 /* bcc - branch if carry clear ie if ([$1f66] - #$2c0a) was negative */, 14,
+             0xad /* lda */, [0x1f, 0x66].reverse(), // LDA $1f66 - lowest digit of max super count in the (misappropriated) top of the stack area
+             'sec',
+             0xe9 /* sbc imm */, [0x2c, 0x00].reverse(), // SEC : SBC #$2c00 . ie, subtract 0x2c00. we wanted to find the tiles that display 0-9, of value 2c00-2c09, now we can check for <= 09 (< 0xa)
+             0xc9 /* cmp imm */, [0x00, 0x0a].reverse(),
+             'bmi', 13, // branch-(if)-minus ie if we found a digit. no need to check pbs
 
-             //0xad /* lda */, [0x1f, 0x6c].reverse(), // LDA $1f6c - lowest digit of max pb count in the (misappropriated) top of the stack area
-             //0xc9 /* cmp */, [0x2c, 0x00].reverse(), // [$1f6c] < #$2c00 ? skip to checking pb count
-             //0x90 /* bcc - branch if carry clear ie if ([$1f6c] - #$2c00) was negative */, 5,
-             //0xc9 /* cmp */, [0x2c, 0x0a].reverse(), // [$1f6c] < #$2c0a ? then we have a digit! -> perform cleanup
-             //0x90 /* bcc - branch if carry clear ie if ([$1f6c] - #$2c0a) was negative */, 1,
-
-             //0x60 /* rts */, // return because we didn't find the remnants of an intermediate copy of an actual digit 0-9
+             0xad /* lda */, [0x1f, 0x6c].reverse(), // LDA $1f6c - lowest digit of max pb count in the (misappropriated) top of the stack area
+             'sec',
+             0xe9 /* sbc imm */, [0x2c, 0x00].reverse(), // SEC : SBC #$2c00 . ie, subtract 0x2c00. we wanted to find the tiles that display 0-9, of value 2c00-2c09, now we can check for <= 09 (< 0xa)
+             0xc9 /* cmp imm */, [0x00, 0x0a].reverse(),
+             'bmi', 1, // branch-(if)-minus ie if we found a digit
+             'rts', // return because we didn't find the remnants of an intermediate copy of an actual digit 0-9
 
              // put blanks over the intermediate copy of each max ammo count tile (like memset)
              'phy', // push Y register
