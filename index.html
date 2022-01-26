@@ -567,29 +567,354 @@ maxAmmoDisplay = [
 ]
 
 // suit pickup position, a softlock prevention by strotlog
-// when she picks up gravity or varia suit, samus will now enter standing pose facing player as vanilla, but preserving the center of her X and Y position.
-// this is instead of being placed in the center of the screen (for which the vanilla game calculates where to move samus in the room position based on current scroll values).
-// still, kind of awkward because the expanding, full-screen graphical effect of samus powering up, a complex sequence of HDMA effects, is still centered in the middle of the
-// screen and therefore not on samus.
+// when samus picks up gravity or varia suit, samus's X and Y position will be restored.
+// some poses can be restored too.
+// this is instead of being left in the center of the screen, where you could get locked if it's not connected to open air.
 suitPickupsNowPreserveSamusLocation = [
+    //
+    // overview of vanilla code:
+    //
+    // suit plm's: (varia=$84:E2A1 plm, gravity=$84:E2D6 plm, plus chozo and shot variations, 6 total plm's)
+    // after the message box closes,
+    // plm calls custom function (varia=$91:D4E4, gravity=$91:D5BA)
+    // $91:D4E4: Varia suit pick up &
+    // $91:D5BA: Gravity suit pick up:
+    //     set pose <-- ** we modify the pose - same modification for each suit **
+    //     set position (scroll+const = center-ish) <-- ** we modify the position slightly - same modification for each suit **
+    //     set samus drawing handler function to $90:EC1D: Samus display handler - Samus recevied fatal damage
+    //         (the change is accomplished via this function doing LDA #$0015 : JSL $90:F084)
+    //         $90:EC1D is a jsr wrapper for 'JSL $90:8A00'. *see below for modification!
+    //     call $88:8435: Spawn HDMA Object
+    //         param: external function = $91:D692
+    //             initializes some WRAM and various higher addresses that are documented only for other specialized purposes like x-ray and crystal flash
+    //         param: pre-instruction function pointer (varia=$88:E026, gravity=$88:E05C)
+    //         $88:E026: Used by varia suit pickup &
+    //         $88:E05C: Used by gravity suit pickup:
+    //             these must get called repeatedly during animation. each calls one function out of a sequential function pointer table of 7 animation functions:
+    //             #0: $88:E092
+    //             #1: $88:E0D7
+    //             #2: $88:E113
+    //             #3: varia=$88:E320, gravity=$88:E361
+    //                 set pose again for no clear reason <-- ** we NOP the pose change out -
+    //                                                           same modification for each suit **
+    //             #4: $88:E1BA
+    //             #5: $88:E22B
+    //             #6: varia=$88:E258, gravity=$88:E25F
+    //                 set music to item room music if varia <-- ** we NOP the music out **
+    //                 <-- ** we insert moving samus back, and sometimes changing pose, here **
+    //                 various cleanup. includes resetting samus drawing routine
+    //                 (these two functions are actually a shared function with an additional instruction for varia at the top, falling through to the gravity function)
+    // 
+    // 
+    // $90:8A00 wrapped by $90:EC1D: this is the samus display handler for elevators, door transitions, deaths, and suit pickups
+    //     call              (for top of samus) $81:89AE: Add Samus spritemap to OAM
+    //     sometimes call (for bottom of samus) $81:89AE: Add Samus spritemap to OAM
+    //     ^ <-- ** we wrap both calls and modify any samus sprites that were just added to the OAM to be drawn,
+    //              such that samus's sprites will now be drawn at highest priority (3), in front of the room tiles.
+    //              this achieves samus not clipping behind anything during the suit acquisition animation.          **
+    //
+
     // modify function "$91:D4E4: Varia suit pick up"
-    // here we NOP out the vanilla writes (stores) to samus X pixel position, samus Y pixel position, samus previous X pixel position, samus previous Y pixel position
+    // here we save off samus's position, and modify it slightly before it gets written
     {address: 0x8d57d, type: 'overwrite',
-     bytes: ['nop', 'nop', 'nop', 'nop', 'nop', 'nop']},
-    {address: 0x8d58a, type: 'overwrite',
-     bytes: ['nop', 'nop', 'nop', 'nop', 'nop', 'nop']},
+     bytes: ['jsl', [0x92, 0xee, 0x40].reverse(), // call $92:ee40
+             'bra', 7,
+             'nop', 'nop', 'nop', 'nop',
+             'nop', 'nop', 'nop',
+             ].flat()},
     // modify function "$91:D5BA: Gravity suit pick up"
-    // same as previous above. we NOP out the vanilla writes (stores) to samus X pixel position, samus Y pixel position, samus previous X pixel position, samus previous Y pixel position
+    // exact same as above (but for Gravity instead of Varia)
     {address: 0x8d655, type: 'overwrite',
-     bytes: ['nop', 'nop', 'nop', 'nop', 'nop', 'nop']},
-    {address: 0x8d662, type: 'overwrite',
-     bytes: ['nop', 'nop', 'nop', 'nop', 'nop', 'nop']},
-    // modify function $91:E258 where the second instruction queues item room music track (aka elevator music aka track 3).
+     bytes: ['jsl', [0x92, 0xee, 0x40].reverse(), // call $92:ee40
+             'bra', 7,
+             'nop', 'nop', 'nop', 'nop',
+             'nop', 'nop', 'nop',
+             ].flat()},
+    // define function $92:ee40: save off samus's position and modify it slightly before it gets written
+    // return value: A: Y-pixel position that samus should be set to for the animation
+    {address: 0x96e40, type: 'freespace',
+     bytes: [
+             'pha',
+             // save off original position to subpixel position
+             0xad /* lda */, [0x0a, 0xf6].reverse(), // LDA $0AF6: Samus X position
+             0x8d /* sta */, [0x0a, 0xf8].reverse(), // $0AF8: Samus X subposition = Samus X position
+             0xad /* lda */, [0x0a, 0xfa].reverse(), // LDA $0AFA: Samus Y position
+             0x8d /* sta */, [0x0a, 0xfc].reverse(), // $0AFC: Samus Y subposition = Samus Y position
+             'pla',
+             // vanilla code we overwrote (same in both callers):
+             0x8D, 0xF6, 0x0A, // STA $0AF6  [$7E:0AF6]
+             0x8D, 0x10, 0x0B, // STA $0B10  [$7E:0B10]
+             0xAD, 0x15, 0x09, // LDA $0915  [$7E:0915]
+             0x18,             // CLC
+             0x69, 0x88, 0x00, // ADC #$0088
+             // register A now holds the correct return value (new samus Y = Y-scroll ($0915) + #$0088, ie the center of the screen).
+             // depending on how we've posed samus for the animation, we may want to move samus upward half a tile so the animation is centered better.
+             'pha',
+             'clc', // clear carry status bit, as an indicator
+             0xad /* lda */, [0x0a, 0x1c].reverse(), // $0A1C: Samus pose
+             'beq', 6, // if pose == 0 (facing forward), goto finish
+             0x49 /* eor imm */, [0x00, 0x9b].reverse(), // checking for == 0x9b - using xor avoids how cmp sets the carry flag
+             'beq', 1, // if pose == 0x9b (the other facing forward), goto finish
+             'sec', // set carry status bit, as an indicator and used for subtraction
+
+             // finish:
+             'pla',
+             'bcs', 1, // skip return if carry set, ie if we modified samus's pose (to non-facing-forward)
+             'rtl', // return if carry cleared, ie if samus is facing forward
+
+             0xe9 /* sbc imm */, [0x00, 0x08].reverse(), // move return value visually upward (numerically less Y) by 8 pixels
+             'rtl',
+             ].flat()},
+    // 4 functions that store hard coded face-forwards during the suit acquisition process
+    // modify function $88:E320: Give Samus varia suit
+    // NOP out the mid-animation pose change
+    {address: 0x46335, type: 'overwrite',
+     bytes: ['nop', 'nop', 'nop']},
+    // modify function $88:E361: Give Samus gravity suit
+    // NOP out the mid-animation pose change
+    {address: 0x46376, type: 'overwrite',
+     bytes: ['nop', 'nop', 'nop']},
+    // modify function $91:D4E4: Varia suit pick up
+    // set pose for animation and sometimes set magic number for post-animation
+    {address: 0x8d551, type: 'overwrite',
+     bytes: [
+             'jsl', [0x92, 0xee, 0x80].reverse(), // call $92:ee80
+
+             // did we keep facing forward and not set a special pose? then for some situations we want to set a magic number and stop facing forward when position is reset at the end of the animation.
+             0xad /* lda */, [0x0a, 0x1c].reverse(), // LDA $0A1C: Samus pose
+             'beq', 5, // if Samus pose == 0 (facing forward), call $92:eec8
+             0xc9 /* cmp imm */, [0x00, 0x9b].reverse(),
+             'bne', 4, // if Samus pose != 0x9b, skip calling
+
+             // call $92:eec8:
+             'jsl', [0x92, 0xee, 0xc8].reverse(), // if (Samus pose == 0(facing foward) || Samus pose == 0x9b(the other facing forward)), then call $92:eec8
+
+             // postcall:
+             'nop', 'nop', 'nop', 'nop',
+             ].flat()},
+    // modify function $91:D5BA: Gravity suit pick up
+    // set pose for animation and sometimes set magic number for post-animation
+    {address: 0x8d629, type: 'overwrite',
+     bytes: [
+             'jsl', [0x92, 0xee, 0x80].reverse(), // call $92:ee80
+
+             // did we keep facing forward and not set a special pose? then for some situations we want to set a magic number and stop facing forward when position is reset at the end of the animation.
+             0xad /* lda */, [0x0a, 0x1c].reverse(), // LDA $0A1C: Samus pose
+             'beq', 5, // if Samus pose == 0 (facing forward), call $92:eec8
+             0xc9 /* cmp imm */, [0x00, 0x9b].reverse(),
+             'bne', 4, // if Samus pose != 0x9b, skip calling
+
+             // call $92:eec8:
+             'jsl', [0x92, 0xee, 0xc8].reverse(), // if (Samus pose == 0(facing foward) || Samus pose == 0x9b(the other facing forward)), then call $92:eec8
+
+             // postcall:
+             'nop', 'nop', 'nop', 'nop',
+             ].flat()},
+    // define function $92:ee80: set samus's pose for suit acquisition animation (samus will retain this pose after)
+    {address: 0x96e80, type: 'freespace',
+     bytes: [
+             0xa2 /* ldx imm */, [0x00, 0x00].reverse(), // X=0
+             0xad /* lda */, [0x09, 0xa2].reverse(), // LDA $09A2: Equipped items
+             0x89 /* bit imm */, [0x00, 0x21].reverse(), // test grav and varia bits: 0x0021
+             'beq', 3, // skip next instruction if no grav and no varia (power suit => X=0)
+             0xa2 /* ldx imm */, [0x00, 0x9b].reverse(), // (either suit => X=9Bh)
+
+             // if we are shinesparking (or crystal flashing?? very untested there): don't touch pose at all:
+             // just pray we don't crash the game cause that seems to happen if we change to an arbitrary pose.
+             // retaining the pose seems to leave samus shinesparking after the pickup, just with reset-to-0 horizontal velocity. works for me.
+             // kinda sketch because it looks lke shinesparking and suit acquisition animation share some memory space (surely the velocity reset is unintentional, for example).
+             // anyway, staying in shinespark pose looks cool, is very simple, and it stopped the crashes in testing.
+             0xad /* lda */, [0x0a, 0x1f].reverse(), // LDA $0A1F: Samus movement type
+             0x29 /* and imm */, [0x00, 0xff].reverse(), // low byte only
+             0xc9 /* cmp imm */, [0x00, 0x1B].reverse(), // check for Samus movement type == 1Bh: Shinespark / crystal flash / drained by metroid / damaged by MB's attacks
+             'bne', 1,
+             'rtl', // return without changing pose if samus is shinesparking
+
+             0x8e /* stx */, [0x0a, 0x1c].reverse(), // $0A1C: Samus pose = #$009b (9Bh: Facing forward - varia/gravity suit). or in weird circumstances #$0000
+
+             0xad /* lda */, [0x0b, 0x00].reverse(), // LDA $0B00: Samus Y radius
+             // check our hitbox size vs https://wiki.supermetroid.run/File:HotaHitboxes.png .. but actually that url just has approximate numbers & is more of a visual reference. actual constant samus hitbox heights we check here come from the table at $91:B629
+             0xc9 /* cmp imm */, [0x00, 0x07].reverse(), // check for morphed: height = 0n14, y-radius = 0n7
+             'beq', 6, // goto morphed if morphed
+             0xc9 /* cmp imm */, [0x00, 0x10].reverse(), // check for crouched: height = 0n32, y-radius = 0n16 (0x10)
+             'beq', 6, // goto crouched if crouched
+             'rtl', // return if neither morphed nor crouched
+
+             // for morphing or crouched, we'll show samus in a morphed or crouched state during the animation (and stay there aferward).
+             // note some surprising times samus has crouch and morph height:
+             // - while unmorphing midair (has crouch height => will be crouched) and
+             // - while morphing midair (has morph height => will be morphed)
+
+             // morphed:
+             0xa9 /* lda imm */, [0x00, 0x31].reverse(), // a = 31h: Facing right - morph ball - no springball - in air
+             'bra', 3, // skip next instruction
+
+             // crouched:
+             // note : i wanted to use samus facing forward+crouched but it's an animation frame, not a pose. and setting a very animated pose here works very weirdly if the animation is turning. when i tried setting pose A2 here, an *animated and position-altering pose during animation*, and samus crouch-turned right-to-left into the suit, if the grab happened on the 3rd of 3 turning animation frames, samus *moved and appearance changed in the middle of* the cutscene (LN outside jail)
+             0xa9 /* lda imm */, [0x00, 0x71].reverse(), // a = 71h: Facing right - crouching - aiming up-right. getting a suit is swag and samus looks cooler aiming. getting an animation frame of her facing forward while crouched would be cool but animated poses don't work (prev. comment)
+
+             // set pose, check direction, possibly set pose again:
+             0x8d /* sta */, [0x0a, 0x1c].reverse(), // $0A1C: Samus pose = a
+             0xad /* lda */, [0x0a, 0x1e].reverse(), // a.lobtye = $0A1E: Samus pose X direction. 8 = right, 4 = left.
+             0x89 /* bit imm */, [0x00, 0x04].reverse(), // test bit 4 (left)
+             'bne', 1, // skip next instruction if samus is facing left
+             'rtl', // return
+
+             // samus is facing left:
+             0xee /* inc */, [0x0a, 0x1c].reverse(), // ($0A1C: Samus pose)++. this maps either of the 2 facing right poses we have just set to the corresponding facing left pose
+             'rtl', // return
+             ].flat()},
+    // define function $92:eec8: if samus is not on the ground, set a magic number
+    {address: 0x96ec8, type: 'freespace',
+     bytes: [
+             0x9c /* stz */, [0x07, 0x7a].reverse(), // STZ $077A: possibly used as a magic number later
+             0xad /* lda */, [0x0a, 0x1f].reverse(), // LDA $0A1F: Samus movement type
+             0x29 /* and imm */, [0x00, 0xff].reverse(), // low byte only
+
+             // on-the-ground part 1: ran into a wall
+             0xc9 /* cmp imm */, [0x00, 0x15].reverse(), // check for Samus movement type == 15h: Ran into a wall
+             'bne', 1,
+             'rtl', // return if ran into a wall
+
+             // on-the-ground part 2: running
+             0xc9 /* cmp imm */, [0x00, 0x01].reverse(), // check for Samus movement type == 1: Running
+             'bne', 1,
+             'rtl', // return if running
+
+             // on-the-ground part 3: any of:    0: Standing
+             //                                0xe: Turning around - on ground
+             //                                0xf: Crouching/standing/morphing/unmorphing transition
+             //                               0x10: Moonwalking
+             //                               0x11: Spring ball - on ground
+             //                 (0x1e and 0x1f etc: beyond the end of the possible values)
+             0x1a /* inc */,
+             0x1a /* inc */,
+             0x29 /* and imm */, [0x00, 0x0f].reverse(), // compute (Samus movement type + 2) % 16
+             0xc9 /* cmp imm */, [0x00, 0x01].reverse(),
+             0x3a /* dec */,
+             0x3a /* dec */,
+             0x3a /* dec */,
+             // now the n aka negative aka minus flag is set if (Samus movement type + 2) % 16 < 3
+             'bpl', 1, // branch-if-plus: skip next instruction if last dec kept us non-negative, i.e. calculation >= 3
+             'rtl', // return if in any of the above movement states
+
+             0xad /* lda */, [0x0a, 0x1f].reverse(), // LDA $0A1F: Samus movement type
+             // on-the-ground part 4: morph ball - on ground (this check could be omitted based on the way this function gets used but let's do what we said we would)
+             0xc9 /* cmp imm */, [0x00, 0x04].reverse(), // check for Samus movement type == 4: Morph ball - on ground
+             'bne', 1,
+             'rtl', // return if morphed on ground
+
+             // on-the-ground part 5: crouching (this check could be omitted based on the way this function gets used but let's do what we said we would)
+             0xc9 /* cmp imm */, [0x00, 0x05].reverse(), // check for Samus movement type == 5: Crouching
+             'bne', 1,
+             'rtl', // return if crouching
+
+             // ok, we are not on the ground
+             // samus will do the animation completely normally, facing forward; but afterward, enter the falling pose (left or right)
+             // set this up by setting a magic word at an overloaded "$077A: Bit 1 controls flashing for Samus' helmet icon while loading"
+             0xa2 /* ldx imm */, [0x1e, 0xf7].reverse(), // LDX #$1EF7 - our magic word for 'restore samus as falling - facing 'left''
+             0xad /* lda */, [0x0a, 0x1e].reverse(), // a.lobtye = $0A1E: Samus pose X direction. 8 = right, 4 = left.
+             0x89 /* bit imm */, [0x00, 0x04].reverse(), // test bit 4 (left)
+             'bne', 3, // skip next instruction if samus is facing left
+
+             // not on ground, and facing right:
+             0xa2 /* ldx imm */, [0x1e, 0xf6].reverse(), // LDX #$1EF6 - our magic word for 'restore samus as falling - facing 'right''
+
+             // not on ground. store magic number (right or left) in X to $077A
+             0x8e /* stx */, [0x07, 0x7a].reverse(), // STX $077A
+             'rtl', // return
+             ].flat()},
+    // modify function $88:E258 where the second instruction queues item room music track (aka elevator music aka track 3).
     // NOP this instruction out. if we start item room music, it'd be too awkward if the next room loaded will have no track change (common) and keeps playing item room music.
-    //   - how we get here: function "$91:D4E4: Varia suit pick up" -> uses HDMA object $91:D5A2, which -> references pre-instruction function $88:E026, which -> contains and calls function pointer to function $91:E258 as its last callee at the end of the animation/cleanup.
-    //   - for some reason, this is not needed for gravity suit - at this point they differ only in that varia has this music instruction!
+    //   - for some reason, gravity suit never sets music
     {address: 0x4625b, type: 'overwrite',
      bytes: ['nop', 'nop', 'nop', 'nop']},
+    // 2nd modification to function $88:E258 (see above for where this function comes into play).
+    //   (fyi, starting from $88:E25F, where we'll put this 2nd modification, the function applies to both gravity and varia suits)
+    // this mod is super important though;
+    // *actual softlock prevention*
+    // we'll move samus back to where she picked up the suit
+    {address: 0x4625f, type: 'overwrite',
+     bytes: ['jsl', [0x92, 0xef, 0x10].reverse(), // call $92:ef10
+             ].flat()},
+    // define function $92:ef10: restore samus's position which was saved by $92:ee40, and possibly set pose
+    {address: 0x96f10, type: 'freespace',
+     bytes: [
+             // restore samus's position (only to pixel-accuracy)
+             0xad /* lda */, [0x0a, 0xf8].reverse(), // LDA $0AF8: Samus X subposition
+             0x8d /* sta */, [0x0a, 0xf6].reverse(), // $0AF6: Samus X position = Samus X subposition
+             0xad /* lda */, [0x0a, 0xfc].reverse(), // LDA $0AFC: Samus Y subposition
+             0x8d /* sta */, [0x0a, 0xfa].reverse(), // $0AFA: Samus Y position = Samus Y subposition
+             // for a deterministic outcome, let's zero the subpixel position, the memory for which we had commandeered and can now release
+             0x9c /* stz */, [0x0a, 0xf8].reverse(), // STZ $0AF8: Samus X subposition = 0
+             0x9c /* stz */, [0x0a, 0xfc].reverse(), // STZ $0AFC: Samus Y subposition = 0
+
+             // check our magic number for a pose change
+             // (if it got clobbered, that's ok, samus will just hang in midair till the player presses left or right. and even if somehow the magic number was set inadvertently, normally no pose can cause a softlock.)
+             0xad /* lda */, [0x07, 0x7a].reverse(), // LDA $077A: (overloaded this for storing magic number)
+             0xc9 /* cmp imm */, [0x1e, 0xf6].reverse(), // CMP #$1EF6 - would indicate change pose to falling facing right
+             'bne', 5, // if first magic number not found, do left check and then out
+             0xa9 /* lda imm */, [0x00, 0x29].reverse(), // A = new Samus pose = #$0029: pose 29h: Facing right - falling
+             'bra', 8, // goto set pose
+
+             // do left check and then out:
+             0xc9 /* cmp imm */, [0x1e, 0xf7].reverse(), // CMP #$1EF7 - would indicate change pose to falling facing left
+             'bne', 14, // if neither magic number found, goto out
+             0xa9 /* lda imm */, [0x00, 0x2a].reverse(), // A = new Samus pose = #$002A: pose 2Ah: Facing left  - falling
+
+             // set pose:
+             0x8d /* sta */, [0x0a, 0x1c].reverse(), // $0A1C: Samus pose = A
+             // call this typical pair of function calls for completing a pose change (copied from elsewhere in vanilla)
+             0x22, 0x33, 0xF4, 0x91, // JSL $91F433[$91:F433]  ; Set Samus X-direction facing and movement type from her pose, JSR $F468, and if Samus was previously screw attacking, reset palette
+             0x22, 0x08, 0xFB, 0x91, // JSL $91FB08[$91:FB08]  ; Set Samus animation frame if pose changed
+
+             // out:
+             // vanilla code we overwrote:
+             0xE2, 0x20,    // SEP #$20
+             0xA9, 0x80,    // LDA #$80
+             'rtl',
+             ].flat()},
+    // modify function $90:8A00: draws samus during door transitions, elevators, deaths.... and suit pickups.
+    // suit pickup sets this one particular samus drawing routine, which is shared with various other states where you can't control samus.
+    // 
+    // the drawing routine we'll modify is not shared with any active gameplay states, so there is no gameplay performance impact to this code addition.
+    // the function we're modifying has 2 calls to the same function ($81:89AE), we want to wrap both in the same way. first is for top of samus, second (sometimes not called) is for bottom part of samus.
+    {address: 0x80a1d, type: 'overwrite',
+     bytes: ['jsl', [0x92, 0xef, 0x58].reverse(), // call $92:ef58
+             ].flat()},
+    {address: 0x80a41, type: 'overwrite',
+     bytes: ['jsl', [0x92, 0xef, 0x58].reverse(), // call $92:ef58
+             ].flat()},
+    // define function $92:ef58: wrapper for "$81:89AE Add samus spritemap [A] to OAM" which also modifies samus's sprite priority so that she is drawn in front of the room's tiles. looks pretty weird without this.
+    {address: 0x96f58, type: 'freespace',
+     bytes: [
+             0x85 /* sta */, 0x12, // STA $12
+             0xad /* lda */, [0x05, 0x90].reverse(), // LDA $0590: OAM stack pointer (more like an index. and downward growing stack i guess)
+             'pha',
+             0xa5 /* lda */, 0x12, // LDA $12
+             // vanilla code we overwrote (just this 1 jsl instruction):
+             'jsl', [0x81, 0x89, 0xae].reverse(), // JSL $8189AE[$81:89AE]  ; Add Samus spritemap [A] to OAM at position ([X], [Y])
+             'plx',
+
+             // note: do we need to limit this effect to suit acquisition? i would think so, but doors are fine, green brin elevator is totally fine... maybe saw a slight glitch when i ran forward and got nabbed by an enemy in/near a door and kept going? but getting knocked back through the door was fine. ship is fine.
+             0xec /* cpx */, [0x05, 0x90].reverse(), // CPX $0590: OAM stack pointer (post-writing samus sprites)
+             'bmi', 1, // if X < [$0590], run an iteration of the loop
+             'rtl',
+             // OAM entry (conforms to SNES) is:
+             // xxxxxxxx yyyyyyyy tttttttt vhppccct
+             // ^0370,x  ^0371,x  ^0372,x  ^0373,x
+             // p = priority (relative to background)
+             // set pp to what we want
+             0xbd /* lda rel */, [0x03, 0x72].reverse(), // LDA $0372,x
+             0x09 /* or imm */,  [0x30, 0x00].reverse(), // ORA #$3000. set both pp bits (they are in the high byte of the A register due to little endian)
+             0x9d /* sta rel */, [0x03, 0x72].reverse(), // STA $0372,x
+             'inx',
+             'inx',
+             'inx',
+             'inx', // X+=4. go to next OAM entry.
+             'bra', (0xff+1 - 21), // branch backward 21 bytes to the cpx. loop!
+
+             ].flat()},
 ]
 
 function awakeningPatch() {
@@ -671,12 +996,12 @@ function awakeningPatch() {
                            // new code at $8f:ff00:
                            {address: 0x7ff00, type: 'freespace',
                             bytes: [0xaf /* load  */, [0x7e, 0xd8, 0x20].reverse(),
-                                    0x9 /* or */, [0x0, 0x1].reverse(), // set zebes awake event bit
+                                    0x9 /* or imm */, [0x0, 0x1].reverse(), // set zebes awake event bit
                                     0x8f /* store */, [0x7e, 0xd8, 0x20].reverse(),
                                     0xaf /* load  */, [0x7e, 0xd8, 0xb6].reverse(),
-                                    0x9, /* or */, [0x0, 0x4].reverse(), // set bit 4 (3rd bit) of 6th byte of the big door bitmask, ie this is the 51st (counting from 0: number 50 or 0x32) bit of doors. makes it blue
+                                    0x9, /* or imm */, [0x0, 0x4].reverse(), // set bit 4 (3rd bit) of 6th byte of the big door bitmask, ie this is the 51st (counting from 0: number 50 or 0x32) bit of doors. makes it blue
                                     0x8f /* store */, [0x7e, 0xd8, 0xb6].reverse(),
-                                    0x60 /* rts return */,
+                                    'rts', // return
                                     ].flat()},
                            // part 3: when checking the state of pit room or top of morph elevator room, read the zebes awake flag directly. forget about checking morph and missiles
                            //           (part 3 implementation choice: normally we'd just change the function pointer for the state-checking function, to point to the function that checks for a given event. done and done. but wait, that function requires 1 byte of space for a parameter (the "given event"), right after the function pointer, and meanwhile the vanilla morph+missile checking function requires no parameter. so inserting that 1 byte for a parameter would require repointing a ton of stuff! so we overwrite the morph+missile state-checking function's contents instead.)
@@ -792,7 +1117,7 @@ function updateState() {
     <p>This is not exactly a randomizer. Instead, it copies the locations of all the items from a <strong><a href="https://varia.run/">VARIA Randomizer</a></strong> ROM seed that you provide. (VARIA itself may include a rotation randomizer soon.)</p>
     <p>This:</p>
     <ul>
-        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door, & fight BT; 4. balanced suits; 5. escape-climb softlock fix; 6. max ammo equip screen; 7. suit pickup stands samus in-place" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
+        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door, & fight BT; 4. balanced suits; 5. escape-climb softlock fix; 6. max ammo equip screen; 7. suit pickup restores position" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
         <li><strong>Does not ensure the seed is completable.</strong></li>
         <li>Will not show errors plainly yet - check your browser's console if a download link doesn't appear.</li>
         <li>Will not upload or store anything - it's all in your browser. (This means links generated are very temporary and local to this tab.)</li>
