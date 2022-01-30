@@ -375,32 +375,32 @@ maxAmmoDisplay = [
              // in order to keep us flexible for displaying on a different screen in a future implementation.
              0xad /* lda load */, [0x09, 0x98].reverse(), // load $0998 : game state
              0x29 /* and imm */, [0x00, 0xff].reverse(), // low byte only
-             0xc9 /* cmp */, [0x00, 0x08].reverse(), // $0998 (game state) == 0x8 (main gameplay)?
+             0xc9 /* cmp imm */, [0x00, 0x08].reverse(), // $0998 (game state) == 0x8 (main gameplay)?
              'bne', 1, // skip rts if not equal
              'rts', // return first thing if we're in main gameplay!
 
-             0xc9 /* cmp */, [0x00, 0x11].reverse(), // $0998 (game state) == 0x11 (exiting pause)?
+             0xc9 /* cmp imm */, [0x00, 0x11].reverse(), // $0998 (game state) == 0x11 (exiting pause)?
              'bne', 4, // skip jsr:rts if not equal
              0x20 /* jsr */, [0xd5, 0x28].reverse(), // 0x11 (exiting pause) => call $80:d528 (check if we need to do cleanup and do so)
              'rts', // return after calling the cleanup check
 
-             0xc9 /* cmp */, [0x00, 0x12].reverse(), // $0998 (game state) == 0x12 (exiting pause v2)?
+             0xc9 /* cmp imm */, [0x00, 0x12].reverse(), // $0998 (game state) == 0x12 (exiting pause v2)?
              'bne', 4, // skip jsr:rts if not equal
              0x20 /* jsr */, [0xd5, 0x28].reverse(), // 0x12 (exiting pause v2) => call $80:d528 (check if we need to do cleanup and do so)
              'rts', // return after calling the cleanup check
 
-             0xc9 /* cmp */, [0x00, 0x0f].reverse(), // $0998 (game state) == 0xf (paused)?
+             0xc9 /* cmp imm */, [0x00, 0x0f].reverse(), // $0998 (game state) == 0xf (paused)?
              'beq' /* branch if equal */, 1, // skip rts if yes (equal)
              'rts', // return if not paused
              // yes we are paused:
 
              0xad /* lda load */, [0x07, 0x27].reverse(), // load $0727 : pause screen state aka pause index.
-             0xc9 /* cmp */, [0x00, 0x06].reverse(), // $0727 (pause screen state) == 6 (loading the map screen after having shown equipment screen)? we probably only get called once in this state this which is cool)
+             0xc9 /* cmp imm */, [0x00, 0x06].reverse(), // $0727 (pause screen state) == 6 (loading the map screen after having shown equipment screen)? we probably only get called once in this state this which is cool)
              'bne', 4, // skip jsr:rts if not equal
              0x20 /* jsr */, [0xd5, 0x28].reverse(), // 6 (loading the map screen after having shown equipment screen) => call $80:d528 (check if we need to do cleanup and do so)
              'rts', // return after calling the cleanup check
 
-             0xc9 /* cmp */, [0x00, 0x03].reverse(), // $0727 (pause screen state) == 3 (loading the equipment screen)? we probably only get called once in this state this which is cool)
+             0xc9 /* cmp imm */, [0x00, 0x03].reverse(), // $0727 (pause screen state) == 3 (loading the equipment screen)? we probably only get called once in this state this which is cool)
              'beq', 1, // skip rts if equal
              'rts', // return if not deep in a transition between pause screens
 
@@ -896,7 +896,17 @@ suitPickupsNowPreserveSamusLocation = [
              'jsl', [0x81, 0x89, 0xae].reverse(), // JSL $8189AE[$81:89AE]  ; Add Samus spritemap [A] to OAM at position ([X], [Y])
              'plx',
 
-             // note: do we need to limit this effect to suit acquisition? i would think so, but doors are fine, green brin elevator is totally fine... maybe saw a slight glitch when i ran forward and got nabbed by an enemy in/near a door and kept going? but getting knocked back through the door was fine. ship is fine.
+             // don't modify samus drawing priority if we're riding an elevator (2 possible values of $0A44)
+             0xad /* lda */, [0x0A, 0x44].reverse(), // LDA $0A44: Pointer to code to run every frame
+             0xc9 /* cmp imm */, [0xe8, 0xdc].reverse(), // CMP #$E8DC
+             'bne', 1,
+             'rtl', // return if [$0A44] == $E8DC Samus is locked
+             0xc9 /* cmp imm */, [0xe8, 0xec].reverse(), // CMP #$E8EC
+             'bne', 1,
+             'rtl', // return if [$0A44] == $E8EC Riding elevator
+
+             // modify the sprites that were just drawn as part of samus to have higher priority and be drawn in front of the level
+             // note: this seems to run fine for drawing samus during door transitions; the door seems to come out on top. maybe saw a slight glitch when i ran forward and got nabbed by an enemy in/near a door and kept going? but getting knocked back through the door was fine. ship is fine.
              0xec /* cpx */, [0x05, 0x90].reverse(), // CPX $0590: OAM stack pointer (post-writing samus sprites)
              'bmi', 1, // if X < [$0590], run an iteration of the loop
              'rtl',
