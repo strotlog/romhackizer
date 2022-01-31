@@ -287,10 +287,13 @@ function patchmain() {
     // code patch (5): fix rotation escape climb's PLM coordinates issues by strotlog
     allOtherPatches = allOtherPatches.concat(fixEscapeClimb)
 
-    // code patch (6): max ammo display by strotlog
+    // code patch (6): fix rotation escape climb's PLM coordinates issues by strotlog
+    allOtherPatches = allOtherPatches.concat(fixRidleyAndDraygonGadoras)
+
+    // code patch (7): max ammo display by strotlog
     allOtherPatches = allOtherPatches.concat(maxAmmoDisplay)
 
-    // code patch (7): suit pickup softlock prevention by strotlog
+    // code patch (8): suit pickup softlock prevention by strotlog
     allOtherPatches = allOtherPatches.concat(suitPickupsNowPreserveSamusLocation)
 
     if (checkForOverlappingPatches(allOtherPatches)) {
@@ -308,7 +311,7 @@ function patchmain() {
     return 0
 }
 
-// SM rotation bug: rando softlock possible because bomb wall does not auto-break in climb room (room $796BA) during escape.
+// SM rotation bug (as of latest=sm rotation beta 11): rando softlock possible because bomb wall does not auto-break in climb room (room $796BA) during escape.
 // let's modify what SM rotation didn't modify:
 //   the setup ASM for this roomstate
 //     - lives at $8f:91a9
@@ -334,6 +337,89 @@ fixEscapeClimb = [
      bytes: [0x00, 0x80].reverse()}, // new X-pixel location of the visual explosion graphic: 0x0080
     {address: 0x334a7, type: 'overwrite',
      bytes: [0x01, 0x00].reverse()}, // new Y-pixel location of the visual explosion graphic: 0x0100. pixel (0x0080, 0x0100) is tile (x=0x08, y=0x10) which puts the graphic right in the middle of the top row of the barrier in rotation, at least after screen shake
+]
+
+// SM rotation bug (as of latest=sm rotation beta 11): game can crash on down-facing gadoras (top of pre-ridley and pre-draygon rooms)
+fixRidleyAndDraygonGadoras = [
+    // down-facing and up-facing gadoras seem to be implemented somewhat differently, with a bigger change for down-facing gadoras vs. vanilla
+    // the down-facing ones don't correctly modify BTS and PLM, resulting in spawning a random plm if samus shoots anything but the leftmost block while the gadora is in a dying state.
+    // pre-ridley dying gadora will spawn a plm that immediately jsr's to $84:ffff (last byte of bank $84 empty space) which crashes the game
+    // (pre-draygon seems to spawn part of a varia suit plm O_o the difference is just what happens to be in $(12),y. and then doesn't crash. grapple block BTS code for BTS >= 0x80 interprets BTS 0xff as needing its own instructions when it's not set up to correctly point to an adjacent block/tile)
+    // rotation's down-facing eye plm introduces a new function (which its up-facing eye plm doesn't do). namely, $84:f160. this new function seems to sort of substitute, incompletely, for $84:D7C3: Instruction - move PLM up one row and make a blue door facing right
+    // so, we'll complete its job
+    //
+    // forwards compatibility:
+    // beta 11's $84:f160 ends with 'rts' + 3x 0xff (free space)
+    // - if a future version of sm: rotation enlarges this function,
+    //   then the patcher *will give a free space error and not patch the rom* because the freespace is no longer there. then this patch should be deleted.
+    // - if a future version of sm: rotation fixes the bug without enlarging the function,
+    //   then this patch will run on top of it if it still actually calls $84:f160. but it only acts if it finds an invalid (odd-numbered) value so likely still OK.
+    {address: 0x2716c, type: 'overwrite',
+     bytes: [0x20 /* jsr */]}, // incomplete instruction, see next patch
+    {address: 0x2716d, type: 'freespace', // note comment above about intentionally triggering freespace errors in future
+     bytes: [
+             [0xf2, 0x40].reverse(), // complete the instruction as "JSR $f240": call new function $84:f240
+             'rts', // overwritten instruction
+             ].flat()},
+    // new function at $84:f240: correct the plm block index, to point to the left block of the down-facing door;
+    //                                   the BTS bytes for the 4 blocks of the down-facing door; and
+    //                                   the level data's corresponding block types for the 4 blocks
+    {address: 0x27240, type: 'freespace', // note comment above about intentionally triggering freespace errors in future
+     bytes: [
+             0xbd /* lda x-indexed */, [0x1c, 0x87].reverse(), // LDA $1c87,X  // $1C87..D6: PLM block indices (into $7F:0002)
+             0x89 /* bit imm */, [0x00, 0x01].reverse(), // test for odd value
+             'bne', 1, // skip next instruction if odd
+             'rts', // return if [0x1c87+x] is even
+
+             // ok, the block index is odd, but it should always be even. that's because entries in $7F:0002 are a word in width but the offset pointing in is in byte terms
+             // since it's odd, we know $84:f160 has a bug
+             0x1a /* inc a */, // undo $84:f160's single decrement - go back to pointing to a full block
+             0x9d, /* sta x-indexed */, [0x1c, 0x87].reverse(), // STA $1c87,X
+             // the function we modified runs multiple times, the first instance being the moment the gadora's health reaches 0. but we don't want to move the PLM multiple times.
+             // if our fix hasn't been applied, => apply it.
+             // if it has, => correct the odd-numbered value at [0x1c87+x] and leave
+             // we can distinguish these situations because the 4 blocks for the door will have the following BTS values:
+             // if fix hasn't been applied (hex) -> 00 44 ff 00
+             //                                        ^ PLM location in the room points to this block
+             // if fix has been applied    (hex) -> 43 ff fe fd
+             //                                     ^ PLM location in the room points to this leftmost block now
+             'phx',
+             0x4a /* lsr a */, // A=PLM's block-location's byte index in BTS table
+                               //  =PLM's block-location's byte index in level data table / 2
+                               //  =[0x1c87+x]/2
+             'tax', // X now indexes into $7f:6402: BTS table, pointing at the BTS of the block that is this PLM's location
+             'sep', 0x20,
+             0xbf /* lda x-indexed long */, [0x7f, 0x64, 0x02].reverse(), // LDA $7f6402,X  // $7F:6402..9601: Active BTS table
+             0xc9 /* cmp imm */, [0x44].reverse(), // BTS at this PLM's location == 0x44 (Generic shot trigger)? 0x44 is used for eye doors. at this point the eye door has been shot to 0 health and is supposed to have been deleted from existing as a BTS, but isn't deleted under the beta 11 bug.
+             'rep', 0x20,
+             'beq', 2, // skip next 2 instructions if [$7f6402+(PLM block index/2)] == 0x44
+             'plx',
+             'rts', // if 0x44 eye door BTS is not there, nothing to fix or we already fixed it. pull X and return
+
+             // apply the full fix.
+             'plx', // X is back to being our PLM index
+             // part (1) of full fix: move the plm one tile left
+             0xbd /* lda x-indexed */, [0x1c, 0x87].reverse(), // LDA $1c87,X  // $1C87..D6: PLM block indices (into $7F:0002)
+             0x3a /* decrement a */,
+             0x3a /* decrement a */,
+             0x9d, /* sta x-indexed */, [0x1c, 0x87].reverse(), // STA $1c87,X
+             // part (2) of full fix: correct the BTS bytes and block types for the 4 door blocks
+             //   values of A for calls to $84:82B4: Write level data block type and BTS:
+             //  |vanilla|  |rotation|
+             //        BTS        BTS
+             //   #$C0 40 -> #$C0 42
+             //   #$D0 FF -> #$50 FF
+             //   #$D0 FE -> #$50 FE
+             //   #$D0 FD -> #$50 FD
+             // we perform only the first one here and hand off the rest to $84:D7EF, which sm rotation repurposed for the above latter 3 calls to $84:82B4
+             //   vanilla  $84:D7EF: Create 3 block vertical extension   (JMP to this and it will PLX:RTS for you)
+             //   rotation $84:D7EF: Create 3 block horizontal extension (JMP to this and it will PLX:RTS for you)
+             'phx',
+             'tax', // X now indexes into $7f:0002: Level data block table, including block types. it points to the block corresponding to this PLM
+             0xa9 /* lda imm */, [0xc0, 0x43].reverse(), // set BTS 0x43: Blue door facing down
+             0x20 /* jsr */, [0x82, 0xb4].reverse(), // JSR $82B4: Write level data block type and BTS:
+             0x4c /* jmp 16-bit */, [0xd7, 0xef].reverse(), // JSR $D7EF: Create 3 block horizontal extension
+             ].flat()},
 ]
 
 // questionable solution because https://wiki.nesdev.org/w/index.php?title=Overscan
@@ -1127,7 +1213,7 @@ function updateState() {
     <p>This is not exactly a randomizer. Instead, it copies the locations of all the items from a <strong><a href="https://varia.run/">VARIA Randomizer</a></strong> ROM seed that you provide. (VARIA itself may include a rotation randomizer soon.)</p>
     <p>This:</p>
     <ul>
-        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door, & fight BT; 4. balanced suits; 5. escape-climb softlock fix; 6. max ammo equip screen; 7. suit pickup restores position" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
+        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door, & fight BT; 4. balanced suits; 5. escape-climb softlock fix; 6. down-facing gadora crash fix; 7. max ammo equip screen; 8. suit pickup restores position" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
         <li><strong>Does not ensure the seed is completable.</strong></li>
         <li>Will not show errors plainly yet - check your browser's console if a download link doesn't appear.</li>
         <li>Will not upload or store anything - it's all in your browser. (This means links generated are very temporary and local to this tab.)</li>
