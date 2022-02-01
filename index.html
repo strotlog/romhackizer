@@ -931,9 +931,17 @@ suitPickupsNowPreserveSamusLocation = [
              0x8d /* sta */, [0x0a, 0xf6].reverse(), // $0AF6: Samus X position = Samus X subposition
              0xad /* lda */, [0x0a, 0xfc].reverse(), // LDA $0AFC: Samus Y subposition
              0x8d /* sta */, [0x0a, 0xfa].reverse(), // $0AFA: Samus Y position = Samus Y subposition
-             // for a deterministic outcome, let's zero the subpixel position, the memory for which we had commandeered and can now release
+             // for a deterministic outcome, let's zero the subpixel position, the memory for which we had commandeered/clobbered and can now release
              0x9c /* stz */, [0x0a, 0xf8].reverse(), // STZ $0AF8: Samus X subposition = 0
              0x9c /* stz */, [0x0a, 0xfc].reverse(), // STZ $0AFC: Samus Y subposition = 0
+
+             // to prevent scrolling, copy current position to overwrite previous position
+             0xad /* lda */, [0x0a, 0xf6].reverse(), // LDA $0AF6: Samus X position
+             0x8d /* sta */, [0x0b, 0x10].reverse(), // $0B10: Samus previous X position = Samus X position
+             0xad /* lda */, [0x0a, 0xfa].reverse(), // LDA $0AFA: Samus Y position
+             0x8d /* sta */, [0x0b, 0x14].reverse(), // $0B10: Samus previous Y position = Samus Y position
+             0x9c /* stz */, [0x0b, 0x12].reverse(), // STZ $0B12: Samus previous X subposition = 0
+             0x9c /* stz */, [0x0b, 0x16].reverse(), // STZ $0B16: Samus previous Y subposition = 0
 
              // check our magic number for a pose change
              // (if it got clobbered, that's ok, samus will just hang in midair till the player presses left or right. and even if somehow the magic number was set inadvertently, normally no pose can cause a softlock.)
@@ -966,13 +974,13 @@ suitPickupsNowPreserveSamusLocation = [
     // the drawing routine we'll modify is not shared with any active gameplay states, so there is no gameplay performance impact to this code addition.
     // the function we're modifying has 2 calls to the same function ($81:89AE), we want to wrap both in the same way. first is for top of samus, second (sometimes not called) is for bottom part of samus.
     {address: 0x80a1d, type: 'overwrite',
-     bytes: ['jsl', [0x92, 0xef, 0x58].reverse(), // call $92:ef58
+     bytes: ['jsl', [0x92, 0xef, 0x68].reverse(), // call $92:ef68
              ].flat()},
     {address: 0x80a41, type: 'overwrite',
-     bytes: ['jsl', [0x92, 0xef, 0x58].reverse(), // call $92:ef58
+     bytes: ['jsl', [0x92, 0xef, 0x68].reverse(), // call $92:ef68
              ].flat()},
-    // define function $92:ef58: wrapper for "$81:89AE Add samus spritemap [A] to OAM" which also modifies samus's sprite priority so that she is drawn in front of the room's tiles. looks pretty weird without this.
-    {address: 0x96f58, type: 'freespace',
+    // define function $92:ef68: wrapper for "$81:89AE Add samus spritemap [A] to OAM" which also modifies samus's sprite priority so that she is drawn in front of the room's tiles. looks pretty weird without this.
+    {address: 0x96f68, type: 'freespace',
      bytes: [
              0x85 /* sta */, 0x12, // STA $12
              0xad /* lda */, [0x05, 0x90].reverse(), // LDA $0590: OAM stack pointer (more like an index. and downward growing stack i guess)
