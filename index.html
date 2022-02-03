@@ -129,127 +129,122 @@ unambiguousInstructionMapping = {
 'SEP': 0xE2, 'XBA': 0xEB, 'XCE': 0xFB, 'BRK': 0x00, 'COP': 0x02, 'RTI': 0x40, 'WAI': 0xCB, 'STP': 0xDB,
 }
 
-// generated this list of 100 item locations in the rotation rom (the right side numbers) by hand 2022/01/05. 96 of them are the same as vanilla, and 2 pairs are swapped
-rotationPlmAddressFromRando = {
-0x78264: 0x78264,
-0x78404: 0x78404,
-0x78432: 0x78432,
-0x7852c: 0x7852c,
-0x78614: 0x78614,
-0x786de: 0x786de,
-0x7879e: 0x7879e,
-0x787c2: 0x787c2,
-0x787fa: 0x787fa,
-0x78824: 0x78824,
-0x78876: 0x78876,
-0x7896e: 0x7896e,
-0x7899c: 0x7899c,
-0x78aca: 0x78aca,
-0x78b24: 0x78b24,
-0x78ba4: 0x78ba4,
-0x78bac: 0x78bac,
-0x78c36: 0x78c36,
-0x78c3e: 0x78c3e,
-0x78c82: 0x78c82,
-0x78cca: 0x78cca,
-0x79108: 0x79108,
-0x79110: 0x79110,
-0x79184: 0x79184,
-0x7c2e9: 0x7c2e9,
-0x7c337: 0x7c337,
-0x7c365: 0x7c365,
-0x7c36d: 0x7c36d,
-0x7c47d: 0x7c47d,
-0x7c559: 0x7c559,
-0x7c5e3: 0x7c5e3,
-0x7c6e5: 0x7c6e5,
-0x7c755: 0x7c755,
-0x7c7a7: 0x7c7a7,
-0x781cc: 0x781cc,
-0x781e8: 0x781e8,
-0x781ee: 0x781ee,
-0x781f4: 0x781f4,
-0x78248: 0x78248,
-0x783ee: 0x783ee,
-0x78464: 0x78464,
-0x7846a: 0x7846a,
-0x78478: 0x78478,
-0x78486: 0x78486,
-0x784ac: 0x784ac,
-0x784e4: 0x784e4,
-0x78518: 0x78518,
-0x7851e: 0x7851e,
-0x78532: 0x78532,
-0x78538: 0x78538,
-0x78608: 0x78608,
-0x7860e: 0x7860e,
-0x7865c: 0x7865c,
-0x78676: 0x78676,
-0x7874c: 0x7874c,
-0x78798: 0x78798,
-0x787d0: 0x787d0,
-0x78802: 0x78802,
-0x78836: 0x78836,
-0x7883c: 0x7883c,
-0x788ca: 0x788ca,
-0x7890e: 0x7890e,
-0x78914: 0x78914,
-0x789ec: 0x789ec,
-0x78ae4: 0x78ae4,
-0x78b46: 0x78b46,
-0x78bc0: 0x78bc0,
-0x78be6: 0x78be6,
-0x78bec: 0x78bec,
-0x78c04: 0x78c04,
-0x78c14: 0x78c14,
-0x78c2a: 0x78c2a,
-0x78c44: 0x78c44,
-0x78c52: 0x78c52,
-0x78c66: 0x78c66,
-0x78c74: 0x78c74,
-0x78cbc: 0x78cbc,
-0x78e6e: 0x78e6e,
-0x78e74: 0x78e74,
-0x78f30: 0x78f30,
-0x78fca: 0x78fca,
-0x78fd2: 0x78fd2,
-0x790c0: 0x790c0,
-0x79100: 0x79100,
-0x7c265: 0x7c265,
-0x7c2ef: 0x7c2ef,
-0x7c319: 0x7c319,
-0x7c357: 0x7c357,
-0x7c437: 0x7c437,
-0x7c43d: 0x7c43d,
-0x7c483: 0x7c483,
-0x7c4af: 0x7c4af,
-0x7c4b5: 0x7c4b5,
-0x7c533: 0x7c533,
-0x7c5dd: 0x7c5dd,
-0x7c5eb: 0x7c5eb,
-0x7c5f1: 0x7c5f1,
-0x7c603: 0x7c603,
-0x7c609: 0x7c609,
-0x7c74d: 0x7c74d
-}
+offsetsInRomOf100ItemPlms = [
+0x78264,
+0x78404,
+0x78432,
+0x7852c,
+0x78614,
+0x786de,
+0x7879e,
+0x787c2,
+0x787fa,
+0x78824,
+0x78876,
+0x7896e,
+0x7899c,
+0x78aca,
+0x78b24,
+0x78ba4,
+0x78bac,
+0x78c36,
+0x78c3e,
+0x78c82,
+0x78cca,
+0x79108,
+0x79110,
+0x79184,
+0x7c2e9,
+0x7c337,
+0x7c365,
+0x7c36d,
+0x7c47d,
+0x7c559,
+0x7c5e3,
+0x7c6e5,
+0x7c755,
+0x7c7a7,
+0x781cc,
+0x781e8,
+0x781ee,
+0x781f4,
+0x78248,
+0x783ee,
+0x78464,
+0x7846a,
+0x78478,
+0x78486,
+0x784ac,
+0x784e4,
+0x78518,
+0x7851e,
+0x78532,
+0x78538,
+0x78608,
+0x7860e,
+0x7865c,
+0x78676,
+0x7874c,
+0x78798,
+0x787d0,
+0x78802,
+0x78836,
+0x7883c,
+0x788ca,
+0x7890e,
+0x78914,
+0x789ec,
+0x78ae4,
+0x78b46,
+0x78bc0,
+0x78be6,
+0x78bec,
+0x78c04,
+0x78c14,
+0x78c2a,
+0x78c44,
+0x78c52,
+0x78c66,
+0x78c74,
+0x78cbc,
+0x78e6e,
+0x78e74,
+0x78f30,
+0x78fca,
+0x78fd2,
+0x790c0,
+0x79100,
+0x7c265,
+0x7c2ef,
+0x7c319,
+0x7c357,
+0x7c437,
+0x7c43d,
+0x7c483,
+0x7c4af,
+0x7c4b5,
+0x7c533,
+0x7c5dd,
+0x7c5eb,
+0x7c5f1,
+0x7c603,
+0x7c609,
+0x7c74d
+]
 function patchmain() {
     let springballcount = 0
     // copy 100 plm's, 2 bytes each
     // modify the in-memory copy of rotation rom in-place to save a little space
-    for (readRandoAddress in rotationPlmAddressFromRando) {
-        readRandoAddress = Number(readRandoAddress) // the keys are strings. key written as 0xf in code will actually be string '15' until we convert it here! thanks javascript
-        writeRotationAddress = rotationPlmAddressFromRando[readRandoAddress]
-        loadedroms['rotation'].allbytes[writeRotationAddress] = loadedroms['rando'].allbytes[readRandoAddress]
-        loadedroms['rotation'].allbytes[writeRotationAddress+1] = loadedroms['rando'].allbytes[readRandoAddress+1]
+    for (address of offsetsInRomOf100ItemPlms) { // foreach (address in list of adddresses)
+        loadedroms['rotation'].allbytes[address] = loadedroms['rando'].allbytes[address]
+        loadedroms['rotation'].allbytes[address+1] = loadedroms['rando'].allbytes[address+1]
 
-        // console.log(writeRotationAddress.toString(16) + ': wrote ' + loadedroms['rando'].allbytes[readRandoAddress].toString(16) + ' ' + loadedroms['rando'].allbytes[readRandoAddress+1].toString(16) + (readRandoAddress!==writeRotationAddress ? ' - read from ' + readRandoAddress.toString(16) : ''))
-
-        itemcopied = loadedroms['rando'].allbytes[readRandoAddress] + loadedroms['rando'].allbytes[readRandoAddress+1]*256 // convert plm from little endian
+        itemcopied = loadedroms['rando'].allbytes[address] + loadedroms['rando'].allbytes[address+1]*256 // convert plm from little endian
         // check for 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
         if (itemcopied === 0xbae9 || itemcopied === 0xbaed) {
             // DO OVER - because the 'nothing item plm' does not exist in sm rotation, we have to use plm id 0xb62f "Don't make PLM" instead. equivalent except no shot blocks
-            loadedroms['rotation'].allbytes[writeRotationAddress] = 0x2f
-            loadedroms['rotation'].allbytes[writeRotationAddress+1] = 0xb6
+            loadedroms['rotation'].allbytes[address] = 0x2f
+            loadedroms['rotation'].allbytes[address+1] = 0xb6
         }
         // check for race mode
         if (itemcopied === 0xef03 || itemcopied === 0xef57 || itemcopied === 0xefab) {
@@ -260,6 +255,28 @@ function patchmain() {
             return -1
         }
     }
+    // only quirk is, sm rotation beta 11 has swapped the positions of 4 missile packs. let's swap them back.
+    [{// correct location of ocean missiles (was @ maze missiles @ (0x30, 0x02))
+      plmOffsetInRom: 0x781e8, newX: 0x04, newY: 0x02},
+     {// correct location of maze missiles (was @ ocean missiles @ (0x04, 0x02))
+      plmOffsetInRom: 0x781f4, newX: 0x30, newY: 0x02},
+     {// correct location of big pink missiles outside charge (was @ middle of big pink missiles near grapple blocks @ (0x6d, 0x24))
+      plmOffsetInRom: 0x7860e, newX: 0x38, newY: 0x22},
+     {// correct location of middle of big pink missiles near grapple blocks (was @ big pink missiles outside charge @ (0x38, 0x22))
+      plmOffsetInRom: 0x78608, newX: 0x6d, newY: 0x24}
+     ].forEach(function (plm) {
+
+        // edit PLM:
+        //  ____________ PLM ID
+        // |     _______ X position
+        // |    |   ____ Y position
+        // |    |  |   _ Parameter
+        // |    |  |  |
+        // iiii xx yy pppp
+        loadedroms['rotation'].allbytes[plm['plmOffsetInRom'] + 2] = plm['newX']
+        loadedroms['rotation'].allbytes[plm['plmOffsetInRom'] + 3] = plm['newY']
+     })
+
 
     // items are done. now do a select few code patches that make things suck less!
 
