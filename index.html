@@ -388,38 +388,65 @@ fixRidleyAndDraygonGadoras = [
              'bne', 1, // skip next instruction if odd
              'rts', // return if [0x1c87+x] is even
 
-             // ok, the block index is odd, but it should always be even. that's because entries in $7F:0002 are a word in width but the offset pointing in is in byte terms
+             // ok, the block index is odd, but it should always be even. this requirement exists because the entries in table $7F:0002 are 1 word in width, whereas the offset pointing into the table is in byte terms
              // since it's odd, we know $84:f160 has a bug
              0x1a /* inc a */, // undo $84:f160's single decrement - go back to pointing to a full block
-             0x9d, /* sta x-indexed */, [0x1c, 0x87].reverse(), // STA $1c87,X
-             // the function we modified runs multiple times, the first instance being the moment the gadora's health reaches 0. but we don't want to move the PLM multiple times.
-             // if our fix hasn't been applied, => apply it.
-             // if it has, => correct the odd-numbered value at [0x1c87+x] and leave
-             // we can distinguish these situations because the 4 blocks for the door will have the following BTS values:
-             // if fix hasn't been applied (hex) -> 00 44 ff 00
-             //                                        ^ PLM location in the room points to this block
-             // if fix has been applied    (hex) -> 43 ff fe fd
-             //                                     ^ PLM location in the room points to this leftmost block now
-             'phx',
+             0x9d, /* sta x-indexed */, [0x1c, 0x87].reverse(), // STA $1c87,X (... and store the result.)
+
+             //
+             // now that we fixed that part...
+             // the buggy function we modified runs multiple times:
+             // - 1st time this is called: is the moment the gadora's health reaches 0
+             // - 2nd time this is called: is around when the gadora death animation ends
+             // we are going to move the PLM in a moment, except, we when we get called the 2nd time, we don't want to move the PLM again, so it'll be conditional
+             // - a very separate time this is called: when loading the room with the gadora dead
+             // so correspondingly,
+             //   if our fix hasn't been applied, => apply it.
+             //   if it has, => correct the odd-numbered value at [0x1c87+x] and leave
+             //   if we're loading the room with the gadora dead, => point the PLM correctly and leave
+             // we can distinguish these situations because the 4 blocks for the door will have the following BTS values at this point:
+             // (the below are shown as post-increment, because we've already undone the weird, buggy single decrement that $84:f160 performs every time, and you can't really show the meaning of an invalid in-between pointer anyway)
+             // if full fix hasn't been applied (hex) -> 00 44 ff 00
+             //                                             ^ PLM location in the room points to this block
+             //                                               therefore now we should apply the full fix to all 4 BTS values *and* all 4 block types as well
+             // if full fix has been applied    (hex) -> 43 ff fe fd
+             //                                          ^ PLM location in the room points to this leftmost block now
+             //                                            therefore all we needed was the re-incrementing that we just did, so return
+             // if loading room w/ dead gadora  (hex) -> 43 ff fe fd
+             //                                             ^ PLM location in the room points to this incorrect block (mainly seems to cause a graphical glitch if left alone)
+             //                                               therefore let's point the PLM to 0x43 where it belongs
+             //
+             'phx', // push X
              0x4a /* lsr a */, // A=PLM's block-location's byte index in BTS table
                                //  =PLM's block-location's byte index in level data table / 2
                                //  =[0x1c87+x]/2
              'tax', // X now indexes into $7f:6402: BTS table, pointing at the BTS of the block that is this PLM's location
              'sep', 0x20,
              0xbf /* lda x-indexed long */, [0x7f, 0x64, 0x02].reverse(), // LDA $7f6402,X  // $7F:6402..9601: Active BTS table
-             0xc9 /* cmp imm */, [0x44].reverse(), // BTS at this PLM's location == 0x44 (Generic shot trigger)? 0x44 is used for eye doors. at this point the eye door has been shot to 0 health and is supposed to have been deleted from existing as a BTS, but isn't deleted under the beta 11 bug.
-             'rep', 0x20,
-             'beq', 2, // skip next 2 instructions if [$7f6402+(PLM block index/2)] == 0x44
-             'plx',
-             'rts', // if 0x44 eye door BTS is not there, nothing to fix or we already fixed it. pull X and return
+             0xc9 /* cmp imm */, [0x44], // BTS at this PLM's location == 0x44? (Generic shot trigger: 0x44 is used for eye doors. at this point the eye door has been shot to 0 health and is supposed to have been deleted from existing as a BTS, but isn't deleted under the beta 11 bug we're fixing.)
+             'beq', 8, // goto BTS_0x44_or_BTS_0xff if [$7f6402+(PLM block index/2)] == 0x44
+             0xc9 /* cmp imm */, [0xff], // BTS at this PLM's location == 0xff? (seems to point to the BTS 1 block to the left?)
+             'beq', 4, // goto BTS_0x44_or_BTS_0xff if [$7f6402+(PLM block index/2)] == 0xff
 
-             // apply the full fix.
-             'plx', // X is back to being our PLM index
-             // part (1) of full fix: move the plm one tile left
-             0xbd /* lda x-indexed */, [0x1c, 0x87].reverse(), // LDA $1c87,X  // $1C87..D6: PLM block indices (into $7F:0002)
-             0x3a /* decrement a */,
-             0x3a /* decrement a */,
-             0x9d, /* sta x-indexed */, [0x1c, 0x87].reverse(), // STA $1c87,X
+             // nothing to fix, we were just called an extra time, so return.
+             'rep', 0x20,
+             'plx', // pull X: X is back to being our PLM index
+             'rts',
+
+             // BTS_0x44_or_BTS_0xff:
+             'rep', 0x20,
+             'plx', // pull X: X is back to being our PLM index
+             // move the plm one tile left: [0x1c87+X]-=2
+             // thus changing the value in this table: $1C87..D6: PLM block indices (into $7F:0002)
+             0xde, /* dec x-indexed */, [0x1c, 0x87].reverse(), // in-memory decrement of $1c87,X
+             0xde, /* dec x-indexed */, [0x1c, 0x87].reverse(), // in-memory decrement of $1c87,X
+             'sep', 0x20,
+             0xc9 /* cmp imm */, [0xff], // BTS at the PLM's old location == 0xff? (seems to point to the BTS 1 block to the left?)
+             'rep', 0x20,
+             'bne', 1, // skip next instruction if the BTS we originally checked was not 0xff (ie, it was 0x44)
+             'rts', // return if BTS we originally checked was 0xff
+
+             // BTS we originally checked was 0x44:
              // part (2) of full fix: correct the BTS bytes and block types for the 4 door blocks
              //   values of A for calls to $84:82B4: Write level data block type and BTS:
              //  |vanilla|  |rotation|
@@ -431,10 +458,13 @@ fixRidleyAndDraygonGadoras = [
              // we perform only the first one here and hand off the rest to $84:D7EF, which sm rotation repurposed for the above latter 3 calls to $84:82B4
              //   vanilla  $84:D7EF: Create 3 block vertical extension   (JMP to this and it will PLX:RTS for you)
              //   rotation $84:D7EF: Create 3 block horizontal extension (JMP to this and it will PLX:RTS for you)
-             'phx',
-             'tax', // X now indexes into $7f:0002: Level data block table, including block types. it points to the block corresponding to this PLM
+             'phx', // push the PLM index; the target of our upcoming JMP will pull it and return control to the PLM processing routine, where X is expected to be the PLM index
+             0xbd /* lda x-indexed */, [0x1c, 0x87].reverse(), // LDA $1c87,X  // $1C87..D6: PLM block indices (into $7F:0002)
+             'tax', // X now indexes into $7f:0002: Level data block table, (with some bits of each word used for indicating block type). it points to the block corresponding to this PLM
              0xa9 /* lda imm */, [0xc0, 0x43].reverse(), // set BTS 0x43: Blue door facing down
-             0x20 /* jsr */, [0x82, 0xb4].reverse(), // JSR $82B4: Write level data block type and BTS:
+             // set the leftmost BTS
+             0x20 /* jsr */, [0x82, 0xb4].reverse(), // JSR $82B4: Write level data block type and BTS
+             // set the other 3 BTSes, then PLX:RTS
              0x4c /* jmp 16-bit */, [0xd7, 0xef].reverse(), // JSR $D7EF: Create 3 block horizontal extension
              ].flat()},
 ]
