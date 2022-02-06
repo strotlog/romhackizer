@@ -815,12 +815,12 @@ suitPickupsNowPreserveSamusLocation = [
 
              // did we keep facing forward and not set a special pose? then for some situations we want to set a magic number and stop facing forward when position is reset at the end of the animation.
              0xad /* lda */, [0x0a, 0x1c].reverse(), // LDA $0A1C: Samus pose
-             'beq', 5, // if Samus pose == 0 (facing forward), call $92:eec8
+             'beq', 5, // if Samus pose == 0 (facing forward), call $92:eee0
              0xc9 /* cmp imm */, [0x00, 0x9b].reverse(),
              'bne', 4, // if Samus pose != 0x9b, skip calling
 
-             // call $92:eec8:
-             'jsl', [0x92, 0xee, 0xc8].reverse(), // if (Samus pose == 0(facing foward) || Samus pose == 0x9b(the other facing forward)), then call $92:eec8
+             // call $92:eee0:
+             'jsl', [0x92, 0xee, 0xe0].reverse(), // if (Samus pose == 0(facing foward) || Samus pose == 0x9b(the other facing forward)), then call $92:eee0
 
              // postcall:
              'nop', 'nop', 'nop', 'nop',
@@ -833,12 +833,12 @@ suitPickupsNowPreserveSamusLocation = [
 
              // did we keep facing forward and not set a special pose? then for some situations we want to set a magic number and stop facing forward when position is reset at the end of the animation.
              0xad /* lda */, [0x0a, 0x1c].reverse(), // LDA $0A1C: Samus pose
-             'beq', 5, // if Samus pose == 0 (facing forward), call $92:eec8
+             'beq', 5, // if Samus pose == 0 (facing forward), call $92:eee0
              0xc9 /* cmp imm */, [0x00, 0x9b].reverse(),
              'bne', 4, // if Samus pose != 0x9b, skip calling
 
-             // call $92:eec8:
-             'jsl', [0x92, 0xee, 0xc8].reverse(), // if (Samus pose == 0(facing foward) || Samus pose == 0x9b(the other facing forward)), then call $92:eec8
+             // call $92:eee0:
+             'jsl', [0x92, 0xee, 0xe0].reverse(), // if (Samus pose == 0(facing foward) || Samus pose == 0x9b(the other facing forward)), then call $92:eee0
 
              // postcall:
              'nop', 'nop', 'nop', 'nop',
@@ -860,9 +860,19 @@ suitPickupsNowPreserveSamusLocation = [
              0xad /* lda */, [0x0a, 0x1f].reverse(), // LDA $0A1F: Samus movement type
              0x29 /* and imm */, [0x00, 0xff].reverse(), // low byte only
              0xc9 /* cmp imm */, [0x00, 0x1B].reverse(), // check for Samus movement type == 1Bh: Shinespark / crystal flash / drained by metroid / damaged by MB's attacks
-             'bne', 1,
-             'rtl', // return without changing pose if samus is shinesparking
+             'bne', 17, // goto not_shinesparking
+             // we want to return here because shinesparking will be a great pose for samus to show off while acquiring a suit, and we also want to allow shinesparking in one go, for example over the moat.
+             // 1 exception: if samus is in the windup for a shinespark (also movement type == 1Bh):
+             //              transitioning from windup to facing forward is required for a trick called Blue Suit via Suit Upgrade https://wiki.supermetroid.run/Blue_Suit_Glitch#Suit_Upgrade
+             0xad /* lda */, [0x0a, 0x1c].reverse(), // LDA $0A1C: Samus pose
+             0x29 /* and imm */, [0x00, 0xff].reverse(), // low byte only
+             0xc9 /* cmp imm */, [0x00, 0xc7].reverse(), // check for Samus pose == C7h: Facing right - vertical shinespark windup
+             'beq', 6, // goto not_shinesparking if in shinespark windup facing right
+             0xc9 /* cmp imm */, [0x00, 0xc8].reverse(), // check for Samus pose == C8h: Facing left - vertical shinespark windup
+             'beq', 1, // goto not_shinesparking if in shinespark windup facing left
+             'rtl', // return without changing pose if samus is shinesparking (and not winding up)
 
+             // not_shinesparking:
              0x8e /* stx */, [0x0a, 0x1c].reverse(), // $0A1C: Samus pose = #$009b (9Bh: Facing forward - varia/gravity suit). or in weird circumstances #$0000
 
              0xad /* lda */, [0x0b, 0x00].reverse(), // LDA $0B00: Samus Y radius
@@ -897,8 +907,8 @@ suitPickupsNowPreserveSamusLocation = [
              0xee /* inc */, [0x0a, 0x1c].reverse(), // ($0A1C: Samus pose)++. this maps either of the 2 facing right poses we have just set to the corresponding facing left pose
              'rtl', // return
              ].flat()},
-    // define function $92:eec8: if samus is not on the ground, set a magic number
-    {address: 0x96ec8, type: 'freespace',
+    // define function $92:eee0: if samus is not on the ground, set a magic number
+    {address: 0x96ee0, type: 'freespace',
      bytes: [
              0x9c /* stz */, [0x07, 0x7a].reverse(), // STZ $077A: possibly used as a magic number later
              0xad /* lda */, [0x0a, 0x1f].reverse(), // LDA $0A1F: Samus movement type
@@ -968,10 +978,10 @@ suitPickupsNowPreserveSamusLocation = [
     // *actual softlock prevention*
     // we'll move samus back to where she picked up the suit
     {address: 0x4625f, type: 'overwrite',
-     bytes: ['jsl', [0x92, 0xef, 0x10].reverse(), // call $92:ef10
+     bytes: ['jsl', [0x92, 0xef, 0x30].reverse(), // call $92:ef30
              ].flat()},
-    // define function $92:ef10: restore samus's position which was saved by $92:ee40, and possibly set pose
-    {address: 0x96f10, type: 'freespace',
+    // define function $92:ef30: restore samus's position which was saved by $92:ee40, and possibly set pose
+    {address: 0x96f30, type: 'freespace',
      bytes: [
              // restore samus's position (only to pixel-accuracy)
              0xad /* lda */, [0x0a, 0xf8].reverse(), // LDA $0AF8: Samus X subposition
@@ -1021,13 +1031,13 @@ suitPickupsNowPreserveSamusLocation = [
     // the drawing routine we'll modify is not shared with any active gameplay states, so there is no gameplay performance impact to this code addition.
     // the function we're modifying has 2 calls to the same function ($81:89AE), we want to wrap both in the same way. first is for top of samus, second (sometimes not called) is for bottom part of samus.
     {address: 0x80a1d, type: 'overwrite',
-     bytes: ['jsl', [0x92, 0xef, 0x68].reverse(), // call $92:ef68
+     bytes: ['jsl', [0x92, 0xef, 0x80].reverse(), // call $92:ef80
              ].flat()},
     {address: 0x80a41, type: 'overwrite',
-     bytes: ['jsl', [0x92, 0xef, 0x68].reverse(), // call $92:ef68
+     bytes: ['jsl', [0x92, 0xef, 0x80].reverse(), // call $92:ef80
              ].flat()},
-    // define function $92:ef68: wrapper for "$81:89AE Add samus spritemap [A] to OAM" which also modifies samus's sprite priority so that she is drawn in front of the room's tiles. looks pretty weird without this.
-    {address: 0x96f68, type: 'freespace',
+    // define function $92:ef80: wrapper for "$81:89AE Add samus spritemap [A] to OAM" which also modifies samus's sprite priority so that she is drawn in front of the room's tiles. looks pretty weird without this.
+    {address: 0x96f80, type: 'freespace',
      bytes: [
              0x85 /* sta */, 0x12, // STA $12
              0xad /* lda */, [0x05, 0x90].reverse(), // LDA $0590: OAM stack pointer (more like an index. and downward growing stack i guess)
