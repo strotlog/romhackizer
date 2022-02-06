@@ -128,6 +128,20 @@ unambiguousInstructionMapping = {
 'PLP': 0x28, 'PLD': 0x2B, 'PLA': 0x68, 'PLY': 0x7A, 'PLB': 0xAB, 'PLX': 0xFA, 'NOP': 0xEA, 'REP': 0xC2,
 'SEP': 0xE2, 'XBA': 0xEB, 'XCE': 0xFB, 'BRK': 0x00, 'COP': 0x02, 'RTI': 0x40, 'WAI': 0xCB, 'STP': 0xDB,
 }
+function snesAddrStringFromRomOffset(romoffset) {
+    within = romoffset % 0x8000
+    bank = (romoffset - within) / 0x8000 + 0x80
+    return bank.toString(16) + ":" + (within + 0x8000).toString(16)
+}
+function romOffsetFromSnesAddrString(snesAddrString) {
+    if (snesAddrString[0] == "$") {
+        snesAddrString = snesAddrString.substring(1)
+    }
+    [bank, highwithin] = snesAddrString.split(":")
+    bank = parseInt("0x" + bank)
+    highwithin = parseInt("0x" + highwithin)
+    return (bank - 0x80)*0x8000 + (highwithin - 0x8000)
+}
 
 offsetsInRomOf100ItemPlms = [
 0x78264,
@@ -231,50 +245,62 @@ offsetsInRomOf100ItemPlms = [
 0x7c609,
 0x7c74d
 ]
-function patchmain() {
-    let springballcount = 0
-    // copy 100 plm's, 2 bytes each
-    // modify the in-memory copy of rotation rom in-place to save a little space
-    for (address of offsetsInRomOf100ItemPlms) { // foreach (address in list of adddresses)
-        loadedroms['rotation'].allbytes[address] = loadedroms['rando'].allbytes[address]
-        loadedroms['rotation'].allbytes[address+1] = loadedroms['rando'].allbytes[address+1]
+function patchmain({hasRoms = true} = {}) {
 
-        itemcopied = loadedroms['rando'].allbytes[address] + loadedroms['rando'].allbytes[address+1]*256 // convert plm from little endian
-        // check for 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
-        if (itemcopied === 0xbae9 || itemcopied === 0xbaed) {
-            // DO OVER - because the 'nothing item plm' does not exist in sm rotation, we have to use plm id 0xb62f "Don't make PLM" instead. equivalent except no shot blocks
-            loadedroms['rotation'].allbytes[address] = 0x2f
-            loadedroms['rotation'].allbytes[address+1] = 0xb6
-        }
-        // check for race mode
-        if (itemcopied === 0xef03 || itemcopied === 0xef57 || itemcopied === 0xefab) {
-            springballcount++
-        }
-        if (springballcount > 5) {
-            console.log('Error: Cannot read items from a Race-Mode protected rando ROM!!')
-            return -1
+    if (hasRoms) {
+        let springballcount = 0
+        // this is kind of the main point of the whole patcher. take items from one rom & put into another.
+        // copy all 100 item PLMs' PLM entry pointers from rando to rotation (pointer size == 2 bytes; bank $84 implied)
+        // modify the in-memory copy of rotation rom in-place to save a little space
+        for (address of offsetsInRomOf100ItemPlms) { // foreach (address in list of adddresses)
+            loadedroms['rotation'].allbytes[address] = loadedroms['rando'].allbytes[address]
+            loadedroms['rotation'].allbytes[address+1] = loadedroms['rando'].allbytes[address+1]
+
+            itemcopied = loadedroms['rando'].allbytes[address] + loadedroms['rando'].allbytes[address+1]*256 // convert plm from little endian
+            // check for 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
+            if (itemcopied === 0xbae9 || itemcopied === 0xbaed) {
+                // DO OVER - because the 'nothing item plm' does not exist in sm rotation, we have to use plm id 0xb62f "Don't make PLM" instead. equivalent except no shot blocks
+                loadedroms['rotation'].allbytes[address] = 0x2f
+                loadedroms['rotation'].allbytes[address+1] = 0xb6
+            }
+            // check for race mode
+            if (itemcopied === 0xef03 || itemcopied === 0xef57 || itemcopied === 0xefab) {
+                springballcount++
+            }
+            if (springballcount > 5) {
+                console.log('Error: Cannot read items from a Race-Mode protected rando ROM!!')
+                return -1
+            }
         }
     }
-    // only quirk is, sm rotation beta 11 has swapped the positions of 4 missile packs. let's swap them back.
-    [{// correct location of ocean missiles (was @ maze missiles @ (0x30, 0x02))
+
+    // everything else we do to the ROM should via this array, in the format {address: ..., type, ..., bytes: ...}
+    patches = []
+
+    // 96 out of 100 items work great with the above.
+    // only quirk is, sm rotation beta 11 has swapped the positions of the other 4 items, which are all missile packs in a non-rando.
+    // let's swap them back to their traditional positions by creating a patch for the x & y positions of these 4 PLMs.
+    plms = [
+     {// correct location of ocean missiles (in rotation, was @ maze missiles @ (0x30, 0x02))
       plmOffsetInRom: 0x781e8, newX: 0x04, newY: 0x02},
-     {// correct location of maze missiles (was @ ocean missiles @ (0x04, 0x02))
+     {// correct location of maze missiles (in rotation, was @ ocean missiles @ (0x04, 0x02))
       plmOffsetInRom: 0x781f4, newX: 0x30, newY: 0x02},
-     {// correct location of big pink missiles outside charge (was @ middle of big pink missiles near grapple blocks @ (0x6d, 0x24))
+     {// correct location of big pink missiles outside charge (in rotation, was @ middle of big pink missiles near grapple blocks @ (0x6d, 0x24))
       plmOffsetInRom: 0x7860e, newX: 0x38, newY: 0x22},
-     {// correct location of middle of big pink missiles near grapple blocks (was @ big pink missiles outside charge @ (0x38, 0x22))
+     {// correct location of middle of big pink missiles near grapple blocks (in rotation, was @ big pink missiles outside charge @ (0x38, 0x22))
       plmOffsetInRom: 0x78608, newX: 0x6d, newY: 0x24}
-     ].forEach(function (plm) {
+    ]
+    plms.forEach(function (plm) {
 
         // edit PLM:
-        //  ____________ PLM ID
+        //  ____________ PLM ID - or more accurately, PLM entry (definition) address in bank $84
         // |     _______ X position
         // |    |   ____ Y position
-        // |    |  |   _ Parameter
+        // |    |  |   _ Parameter - not important here but FYI, for item PLMs, Parameter is the unique ID in the $7E:D870..AF array - confusing...
         // |    |  |  |
         // iiii xx yy pppp
-        loadedroms['rotation'].allbytes[plm['plmOffsetInRom'] + 2] = plm['newX']
-        loadedroms['rotation'].allbytes[plm['plmOffsetInRom'] + 3] = plm['newY']
+        patches.push({address: plm['plmOffsetInRom'] + 2, type: 'overwrite',
+                      bytes: [plm['newX'], plm['newY']]})
      })
 
 
@@ -286,47 +312,110 @@ function patchmain() {
     // and confirmed at http://patrickjohnston.org/bank/84#fE3EF ,
     // there is a vanilla bug in normally unused code.  picking up a hidden morph ball or a chozo morph ball will result in you getting spring ball instead (lol).
     // this vanilla bug is not fixed in sm rotation (cause why would it be) so let's fix it here!
-    loadedroms['rotation'].allbytes[0x268CE] = 4 // moprh in chozo orb. 4=morph item-having bit. was 2=spring
-    loadedroms['rotation'].allbytes[0x26E02] = 4 // moprh in hidden aka shot block. 4=morph item-having bit. was 2=spring
+    // fix morph in chozo orb. 0x04=morph item-having bit. was 2=spring:
+    patches.push({address: 0x268ce, type: 'overwrite',
+                  bytes: [0x04]})
+    // fix morph in hidden aka shot block. 0x04=morph item-having bit. was 2=spring:
+    patches.push({address: 0x26e02, type: 'overwrite',
+                  bytes: [0x04]})
 
     // code patch (3): awaken zebes when player transitions from morph ball room to construction zone (otherwise, if you don't get ammo among the first 2 items, you are softlocked). MANY, MANY more softlocks are NOT prevented
-    ret = awakeningPatch()
-    if (ret != 0) {
-        return ret
+    if (hasRoms) {
+        if (!willAwakeningPatchWork(loadedroms['rotation'].allbytes)) {
+            return -1
+        }
     }
+    patches.push(...zebesAwakeningPatch)
 
-    // code patch (4): balanced suits, cause varia being useless is not very fun!
-    loadedroms['rotation'].allbytes[0x6e37d] = 0x01 // remove gravity's heat protection
-    loadedroms['rotation'].allbytes[0x869dd] = 0x01 // replace the code where environmental damage calculation looks for gravity suit, with varia suit instead (in function $90:E9CE). gravity does nothing for enviro now
+    // code patch (4): BT always awakens (nedeed because rotation always locks you in there)
+    patches.push(...bombTorizoPatch)
 
-    allOtherPatches = []
-
-    // code patch (5): fix rotation escape climb's PLM coordinates issues by strotlog
-    allOtherPatches = allOtherPatches.concat(fixEscapeClimb)
+    // code patch (5): balanced suits, because varia suit being useless is not very fun!
+    // remove gravity's heat protection:
+    patches.push({address: 0x6e37d, type: 'overwrite',
+                  bytes: [0x01]})
+    // replace the code where environmental damage calculation looks for gravity suit, with varia suit instead (in function $90:E9CE). gravity does nothing for enviro now:
+    patches.push({address: 0x869dd, type: 'overwrite',
+                  bytes: [0x01]})
 
     // code patch (6): fix rotation escape climb's PLM coordinates issues by strotlog
-    allOtherPatches = allOtherPatches.concat(fixRidleyAndDraygonGadoras)
+    patches.push(...fixEscapeClimb)
 
-    // code patch (7): max ammo display by strotlog
-    allOtherPatches = allOtherPatches.concat(maxAmmoDisplay)
+    // code patch (7): fix rotation escape climb's PLM coordinates issues by strotlog
+    patches.push(...fixRidleyAndDraygonGadoras)
 
-    // code patch (8): suit pickup softlock prevention by strotlog
-    allOtherPatches = allOtherPatches.concat(suitPickupsNowPreserveSamusLocation)
+    // code patch (8): max ammo display by strotlog
+    patches.push(...maxAmmoDisplay)
 
-    if (checkForOverlappingPatches(allOtherPatches)) {
+    // code patch (9): suit pickup softlock prevention by strotlog
+    patches.push(...suitPickupsNowPreserveSamusLocation)
+
+    if (checkForOverlappingPatches(patches)) {
         return -1
     }
-    if (checkForFreespaceConflict(allOtherPatches)) {
+    if (hasRoms) {
+        if (checkForFreespaceConflict(patches)) {
+            return -1
+        }
+    }
+    patches = assembleUnambiguousInstructions(patches)
+    if (patches.length === 0) {
         return -1
     }
-    allOtherPatches = assembleUnambiguousInstructions(allOtherPatches)
-    if (allOtherPatches.length === 0) {
-        return -1
-    }
-    applyPatch(allOtherPatches)
 
-    return 0
+    if (hasRoms) {
+        applyPatch(patches)
+        return 0
+    } else {
+        return patches
+    }
 }
+
+zebesAwakeningPatch = [
+    // part 1: when samus enters construction zone from morph ball room, call (part 2)
+    // address = 0x18eb4 = ($83:8EAA + 0x10) i.e., door $83:8EAA's door asm
+    {address: 0x18eb4, type: 'overwrite',
+     bytes: [0xff, 0x00].reverse()},
+    // part 2: ... set zebes awake event bit. (does not affect the currently loaded/loading room, but effective thereafter)
+    // part 2b: ... and also set the door from construction zone (vanilla-right side of CZ; rotation-bottom side of CZ) from red to blue
+    // new code at $8f:ff00:
+    {address: 0x7ff00, type: 'freespace',
+     bytes: [0xaf /* load  */, [0x7e, 0xd8, 0x20].reverse(),
+             0x9 /* or imm */, [0x0, 0x1].reverse(), // set zebes awake event bit
+             0x8f /* store */, [0x7e, 0xd8, 0x20].reverse(),
+             0xaf /* load  */, [0x7e, 0xd8, 0xb6].reverse(),
+             0x9, /* or imm */, [0x0, 0x4].reverse(), // set bit 4 (3rd bit) of 6th byte of the big door bitmask, ie this is the 51st (counting from 0: number 50 or 0x32) bit of doors. makes it blue
+             0x8f /* store */, [0x7e, 0xd8, 0xb6].reverse(),
+             'rts', // return
+             ].flat()},
+    // part 3: when checking the state of pit room or top of morph elevator room, read the zebes awake flag directly. forget about checking morph and missiles
+    //           (part 3 implementation choice: normally we'd just change the function pointer for the state-checking function, to point to the function that checks for a given event. done and done. but wait, that function requires 1 byte of space for a parameter (the "given event"), right after the function pointer, and meanwhile the vanilla morph+missile checking function requires no parameter. so inserting that 1 byte for a parameter would require repointing a ton of stuff! so we overwrite the morph+missile state-checking function's contents instead.)
+    // modify "$8F:E652: Room state check: morphball and missiles" from vanilla
+    {address: 0x7e652, type: 'overwrite',
+     bytes: [0xaf /* load  */, [0x7e, 0xd8, 0x20].reverse(),
+             0x89 /* bit test A with constant */, [0x00, 0x01].reverse(),
+             'bne', 3, // branch-(if)-not-equal-(to-zero): branch if a matching 1 bit was found
+             // fall back to default state - room is dead
+             'inx', // X++
+             'inx', // X++ - fully passed over the pointer to 2nd (room alive) room state header, register X now pointing to next function pointer (E5E6: default state handler)
+             'rts', // return
+             // specify state header "room is alive"!
+             0xbd /* load A=*(X+0) */, 0x00, 0x00,
+             'tax', /* X=A */
+             0x4c /* jmp */, [0xe5, 0xe6].reverse(),
+             ].flat()},
+    ]
+
+// force the BT fight as soon as samus enters the room. (sm rotation always locks you in the room; beating bt unlocks the door.)
+// modify "$84:D33B: wake PLM if Samus has bombs" from vanilla, which wakes bomb torizo (BT)
+// random note, this patch is sufficient for rotation but wouldn't be for vanilla. rotation replaced the very custom door in the room with a generic gray door, which always closes.
+bombTorizoPatch = [
+    {address: 0x2533b, type: 'freespace',
+     bytes: ['nop', 'nop', 'nop', // remove the "If Samus doesn't have bombs" branch
+             'nop', 'nop', 'nop', //   for the crumbling chozo,
+             'nop', 'nop',        //   using NOP x8
+             ].flat()},
+    ]
 
 // SM rotation bug (as of latest=sm rotation beta 11): rando softlock possible because bomb wall does not auto-break in climb room (room $796BA) during escape.
 // let's modify what SM rotation didn't modify:
@@ -1078,21 +1167,54 @@ suitPickupsNowPreserveSamusLocation = [
              ].flat()},
 ]
 
-function awakeningPatch() {
+function willAwakeningPatchWork(romBytes) {
 
     // this rom-reading is very unlikely to be necessary, but it's fun. cordon off into sub-function
-    function getDoorAsmAddressToModify() {
-        // all 3 real doors should be going to the rooms we think they are, and should have no door asm. just to be sure we're overwriting the right thing! this also makes us resilient to door repointing, and able to bail if rooms have been repointed
-        // morph ball room's header (0x79e9f) in bank $8f:
-        //     .(doors out arr pointer @ offset +9)
-        // doors out arr in bank $8f:
-        //     door 1 pointer - door to green hill zone (0x79e52) (points to door header for this door - door bank $83 is implied for door headers)
-        //     door 2 pointer - door to construction zone (0x79f11)
-        //     door 3 pointer - door to top of morph ball elevator room (0x797b5)
-        //     fake door 4 pointer 88FC - means end of list - dereference and find offset 0 is 0000
-        // door header in bank $83:
-        //     .(dest room pointer, a room header @ offset 0)
-        //     .(door asm pointer @ offset +0xa - bank $8f is implied for door asm code)
+    function getMorphToConstrDoorHeaderRomAddress({romBytes, expectedResult} = {}) {
+        // all 3 real doors should be going to the rooms we think they are, and should have no door asm. just to be sure we're overwriting the right thing!
+        // this also means we can bail if rooms' headers aren't all where we think they are, and makes door repointing possible in future
+        // room header structure (always in bank $8f):
+        //  ____________________________________ Room index
+        // |   _________________________________ Area index
+        // |  |   ______________________________ X position (of top left corner) on the map
+        // |  |  |   ___________________________ Y position (of top left corner) on the map
+        // |  |  |  |   ________________________ Room width (in units of screens = 16 blocks = 256 pixels)
+        // |  |  |  |  |   _____________________ Room height (in units of screens = 16 blocks = 256 pixels)
+        // |  |  |  |  |  |   __________________ Up scroller
+        // |  |  |  |  |  |  |   _______________ Down scroller
+        // |  |  |  |  |  |  |  |   ____________ CRE bitset
+        // |  |  |  |  |  |  |  |  |   _________ Door list pointer
+        // |  |  |  |  |  |  |  |  |  |     ____ State conditions list
+        // |  |  |  |  |  |  |  |  |  |    |
+        // |  |  |  |  |  |  |  |  |  |    |
+        // ii aa xx yy ww hh uu dd cc dddd [...]
+        //                            ^ this is what we want. offset = +9
+        // door list structure (always in bank $8f):
+        //  _________________ First door pointer (door BTS 0)
+        // |     ____________ Second door pointer (door BTS 1)
+        // |    |     _______ Other door pointers (door BTS 2+)
+        // |    |    |
+        // aaaa bbbb [...]
+        // (unknown number of doors - but we know how many doors to expect in the room we want)
+        // door header structure (always in bank $83):
+        //  _____________________________ Destination room header pointer (bank $8F)
+        // |     ________________________ Elevator properties
+        // |    |   _____________________ Orientation
+        // |    |  |   __________________ X position low byte
+        // |    |  |  |   _______________ Y position low byte
+        // |    |  |  |  |   ____________ X position high byte
+        // |    |  |  |  |  |   _________ Y position high byte
+        // |    |  |  |  |  |  |   ______ Distance from door to spawn Samus
+        // |    |  |  |  |  |  |  |     _ Custom door ASM to execute (bank $8F)
+        // |    |  |  |  |  |  |  |    |
+        // rrrr ee oo xx yy XX YY dddd aaaa
+        //   we'll check:  rrrr (offset 0), aaaa (offset +0n10 aka +0xa)
+        //   we'll modify:                  aaaa (offset +0n10 aka +0xa)
+        // morph ball room (smileid: 0x79e9f) - door list should be:
+        //     door 1 pointer - door to green hill zone (smileid of destination room: 0x79e52)
+        //     door 2 pointer - door to construction zone (smileid of destination room: 0x79f11)
+        //     door 3 pointer - door to top of morph ball elevator room (smileid of destination room: 0x797b5)
+        //     unused door 4 pointer, door header 88FC - null
         requireddestinations = [{smileid: 0x79e52, roomname: 'Green Hill Zone'},
                                 {smileid: 0x79f11, roomname: 'Construction Zone'},
                                 {smileid: 0x797b5, roomname: 'Top of Morph Ball Elevator Room'},
@@ -1100,124 +1222,78 @@ function awakeningPatch() {
         destinationToModify = requireddestinations[1] // Construction Zone
 
         // read all 3 doors
-        doorliststart = readUint16LE(loadedroms['rotation'].allbytes, 0x79e9f + 9)
-        doorliststart |= 0x70000 // prepare to read again from bank $8f
-        doors = [doorliststart, doorliststart+2, doorliststart+4].map(
+        doorliststart = readUint16LE(romBytes, 0x79e9f + 9)
+        doorliststartInRom =  romOffsetFromSnesAddrString("8F:" + doorliststart.toString(16))
+        doors = [doorliststartInRom, doorliststartInRom+2, doorliststartInRom+4].map(
 
-            (doorlistentry) => readUint16LE(loadedroms['rotation'].allbytes, doorlistentry) | 0x10000 /* prepare to read from bank $83 */).map(
-
-            (doorheader) => ({
-                dest:    readUint16LE(loadedroms['rotation'].allbytes, doorheader),
-                doorasm: readUint16LE(loadedroms['rotation'].allbytes, doorheader+0xa),
-                thisDoorHeaderLocationInRom: doorheader,
+            (doorListElementAddressInRom) => readUint16LE(romBytes, doorListElementAddressInRom)).map(
+            (doorheaderstart) => romOffsetFromSnesAddrString("83:" + doorheaderstart.toString(16))).map(
+            (doorheaderstartInRom) => ({
+                dest:    readUint16LE(romBytes, doorheaderstartInRom),
+                doorasm: readUint16LE(romBytes, doorheaderstartInRom+0xa),
+                thisDoorHeaderLocationInRom: doorheaderstartInRom,
             }))
+        // do all 3 doors go where we think they do? (in any order)
         for (i = 0; i < requireddestinations.length; i++) {
             if (!(doors.map((door) => door.dest)).includes(requireddestinations[i].smileid & 0xffff)) {
-                return { error: 'Error: Bailing, cannot confidently apply zebes awakening patch because ' + requireddestinations[i].roomname + ' not found in morph ball room\'s adjacent rooms in rotation rom. Doors found: ' + JSON.stringify(doors, stringifyInHex) }
+                console.log('Error: Bailing, cannot confidently apply zebes awakening patch because ' + requireddestinations[i].roomname + ' not found in morph ball room\'s adjacent rooms in rotation rom. Doors found: ' + JSON.stringify(doors, stringifyInHex))
+                return { success: false }
             }
         }
-        doorToModifyIndex = -1
+        doorToModify = null
         for (i = 0; i < doors.length; i++) {
             if (doors[i].dest === (destinationToModify.smileid & 0xffff)) {
-                doorToModifyIndex = i
-            }
-            if (doors[i].doorasm !== 0) {
-                if (doorToModifyIndex !== i) {
-                    return { error: 'Error: At least one door in morph ball room in rotation rom, has door ASM already, cannot confidently apply zebes awakening patch. Doors found: ' + JSON.stringify(doors, stringifyInHex) }
-                } else {
-                    // well, this is the door we want to modify, which has an asm. report a similar error *tentatively*, but allow checking whether the desired patch was already applied
-                    return { error: 'Error: The door we want to modify in morph ball room in rotation rom, has door ASM already. Cannot apply zebes awakening patch. Doors found: ' + JSON.stringify(doors, stringifyInHex),
-                             checkAlreadyPatched: (doors[i].thisDoorHeaderLocationInRom + 0xa )
-                            }
-                }
+                doorToModify = doors[i]
             }
         }
-
-        return { success: (doors[doorToModifyIndex].thisDoorHeaderLocationInRom + 0xa) }
-    }
-
-    doorfinder = getDoorAsmAddressToModify()
-    if ('error' in doorfinder) {
-        if (!('checkAlreadyPatched' in doorfinder)) {
-            console.log(doorfinder['error'])
-            return -1
-        } else {
-            doorAsmRomAddressToModify = doorfinder['checkAlreadyPatched'] // should be 0x18eb4
+        if (doorToModify.doorasm !== 0) {
+            // well, this is the door we want to modify, which has an asm. report an error *tentatively*, but allow checking whether the desired patch was already applied
+            return { success: false,
+                     contingentSuccess: {
+                         checkIfNonNullDoorAsmPointerIsGood : true,
+                         errorText: 'Error: The door we want to modify in morph ball room in rotation rom, has door ASM already. Cannot apply zebes awakening patch. Doors found: ' + JSON.stringify(doors, stringifyInHex)
+                         // doorHeaderRomAddressToConfirmPatched : (doorToModify.thisDoorHeaderLocationInRom + 0xa ) // no longer need this with expectedResult
+                     }
+                   }
         }
-    } else {
-        doorAsmRomAddressToModify = doorfinder['success'] // should be 0x18eb4
+
+        // we knew the right answer all along, sorry
+        // we could have gone with finding the door dynamically and patching it wherever it happens to be in the ROM with all the support code here, but it's not expected to change, and having a static patch is beneficial when possible!
+        if (doorToModify.thisDoorHeaderLocationInRom != expectedResult) {
+            console.log('Expected the door header for the door from Morph Room to Construction Zone to be at ROM address 0x' + expectedResult.toString(16) + ' (' + snesAddrStringFromRomOffset(expectedResult) + ')' + ', but instead found the door\'s header at ROM address 0x' + doorToModify.thisDoorHeaderLocationInRom.toString(16) + ' (' + snesAddrStringFromRomOffset(doorToModify.thisDoorHeaderLocationInRom) + ')')
+            return { success : false }
+        }
+
+        return { success: true }
     }
 
-    zebesAwakeningPatch = [
-                           // part 1: when samus enters construction zone from morph ball room, call (part 2)
-                           {address: doorAsmRomAddressToModify, type: 'overwrite',
-                            bytes: [0xff, 0x00].reverse()},
-                           // part 2: ... set zebes awake event bit. (does not affect the currently loaded/loading room, but effective thereafter)
-                           // part 2b: ... and also set the door from construction zone (vanilla-right; rotation-bottom) from red to blue
-                           // new code at $8f:ff00:
-                           {address: 0x7ff00, type: 'freespace',
-                            bytes: [0xaf /* load  */, [0x7e, 0xd8, 0x20].reverse(),
-                                    0x9 /* or imm */, [0x0, 0x1].reverse(), // set zebes awake event bit
-                                    0x8f /* store */, [0x7e, 0xd8, 0x20].reverse(),
-                                    0xaf /* load  */, [0x7e, 0xd8, 0xb6].reverse(),
-                                    0x9, /* or imm */, [0x0, 0x4].reverse(), // set bit 4 (3rd bit) of 6th byte of the big door bitmask, ie this is the 51st (counting from 0: number 50 or 0x32) bit of doors. makes it blue
-                                    0x8f /* store */, [0x7e, 0xd8, 0xb6].reverse(),
-                                    'rts', // return
-                                    ].flat()},
-                           // part 3: when checking the state of pit room or top of morph elevator room, read the zebes awake flag directly. forget about checking morph and missiles
-                           //           (part 3 implementation choice: normally we'd just change the function pointer for the state-checking function, to point to the function that checks for a given event. done and done. but wait, that function requires 1 byte of space for a parameter (the "given event"), right after the function pointer, and meanwhile the vanilla morph+missile checking function requires no parameter. so inserting that 1 byte for a parameter would require repointing a ton of stuff! so we overwrite the morph+missile state-checking function's contents instead.)
-                           // modify "$8F:E652: Room state check: morphball and missiles" from vanilla
-                           {address: 0x7e652, type: 'overwrite',
-                            bytes: [0xaf /* load  */, [0x7e, 0xd8, 0x20].reverse(),
-                                    0x89 /* bit test A with constant */, [0x00, 0x01].reverse(),
-                                    'bne', 3, // branch-(if)-not-equal-(to-zero): branch if a matching 1 bit was found
-                                    // fall back to default state - room is dead
-                                    'inx', // X++
-                                    'inx', // X++ - fully passed over the pointer to 2nd (room alive) room state header, register X now pointing to next function pointer (E5E6: default state handler)
-                                    'rts', // return
-                                    // specify state header "room is alive"!
-                                    0xbd /* load A=*(X+0) */, 0x00, 0x00,
-                                    'tax', /* X=A */
-                                    0x4c /* jmp */, [0xe5, 0xe6].reverse(),
-                                    ].flat()},
-                           // part 4: force the BT fight as soon as samus enters the room. (sm rotation always locks you in the room, beating bt unlocks the door.)
-                           // modify "$84:D33B: wake PLM if Samus has bombs" from vanilla, which wakes bomb torizo (BT)
-                           // random note, this patch is sufficient for rotation but wouldn't be for vanilla. rotation replaced the very custom door in the room with a generic gray door, which always closes.
-                           {address: 0x2533b, type: 'freespace',
-                            bytes: ['nop', 'nop', 'nop', // remove the "If Samus doesn't have bombs" branch
-                                    'nop', 'nop', 'nop', // for the crumbling chozo,
-                                    'nop', 'nop',        // using NOP x8
-                                    ].flat()},
-                           ]
-    if ('checkAlreadyPatched' in doorfinder) {
-        // allow us to process multiple rando roms in a single session!
+    doorfinder = getMorphToConstrDoorHeaderRomAddress({romBytes: romBytes, expectedResult: romOffsetFromSnesAddrString("$83:8EAA")})
+    if (doorfinder.success === false) {
+        if (!('contingentSuccess' in doorfinder)) {
+            return false
+        }
+        if (!doorfinder.contingentSuccess['checkIfNonNullDoorAsmPointerIsGood']) {
+            return false
+        }
+        // allow us to process multiple rando roms in a single session by looking for our own patch
         if (!(checkForPatch([zebesAwakeningPatch[0], zebesAwakeningPatch[1]]))) {
             // patch NOT found (at least not entirely), bail
-            if ('error' in doorfinder) {
-                console.log(doorfinder['error'])
+            if ('errorText' in doorfinder.contingentSuccess) {
+                console.log(doorfinder.contingentSuccess['errorText'])
             } else {
-                console.log('checkAlreadyPatch requested and zebesAwakeningPatch [0] and/or [1] not detected in rotation rom')
+                console.log('checkIfNonNullDoorAsmPointerIsGood: zebesAwakeningPatch [0] and/or [1] not detected in rotation rom')
             }
-            return -1
+            return false
         }
     }
-    if (zebesAwakeningPatch[2].bytes.length > 19) {
-        console.log('Implementation error: patching ROM function $8F:E652 has space for only 19 bytes, but the one in this javascript code is ' + zebesAwakeningPatch[2].bytes.length + ' bytes long which does not fit!')
-        return -1
-    }
-    if (checkForOverlappingPatches(zebesAwakeningPatch)) {
-        return -1
-    }
-    if (checkForFreespaceConflict(zebesAwakeningPatch)) {
-        return -1
+
+    modificationToCheckTheLengthOf = zebesAwakeningPatch.filter((x) => x.address == romOffsetFromSnesAddrString("$8F:E652"))[0]
+    if (modificationToCheckTheLengthOf.bytes.length > 19) {
+        console.log('Implementation error: patching ROM function $8F:E652 has space for only 19 bytes, but the one in this javascript code is ' + modificationToCheckTheLengthOf.bytes.length + ' bytes long which does not fit!')
+        return false
     }
 
-    zebesAwakeningPatch = assembleUnambiguousInstructions(zebesAwakeningPatch)
-    if (zebesAwakeningPatch.length === 0) {
-        return -1
-    }
-    applyPatch(zebesAwakeningPatch)
-    return 0
+    return true // yay, it should work
 }
 
 loadedroms = {}
@@ -1259,7 +1335,7 @@ function updateState() {
             console.log('Rando ROM provided is only ' + loadedroms['rando'].allbytes.length + ' bytes, expected ' + 3*1024*1024 + ' or more')
             return
         }
-        ret = patchmain()
+        ret = patchmain({hasRoms: true})
         if (ret != 0) { return }
 
         let blob = new Blob([loadedroms['rotation'].allbytes], {type: 'application/octet-stream'})
@@ -1268,6 +1344,37 @@ function updateState() {
         document.getElementById('aIdDownloadLink').textContent = 'Download Modified SM: Rotation'
     }
 }
+
+document.addEventListener('DOMContentLoaded', function (event) {
+    // check upon loading, before we have any ROMs, for a query string
+    httpQuery = new URLSearchParams(window.location.search)
+    // support simply exporting an IPS of our current patches at ?getips. note, after someone applies this IPS, the ROM will still have to be loaded with rando items
+    if (httpQuery.has('getips')) {
+        patches = patchmain({hasRoms: false})
+    
+        ipsbytes = []
+        ipsbytes.push(...Array.from('PATCH').map((c) => c.charCodeAt(0)))
+        for (modification of patches) {
+            // address: 24-bit big endian
+            ipsbytes.push(...[(modification.address & 0xff0000) >> 16,
+                              (modification.address & 0x00ff00) >> 8,
+                              (modification.address & 0x0000ff)])
+            // length: 16-bit big endian
+            ipsbytes.push(...[(modification.bytes.length & 0xff00) >> 8,
+                              (modification.bytes.length & 0x00ff)])
+            // bytes
+            ipsbytes.push(...modification.bytes)
+        }
+        ipsbytes.push(...Array.from('EOF').map((c) => c.charCodeAt(0)))
+    
+        ipsbytearray = new Uint8Array(ipsbytes)
+        console.log(ipsbytearray[0])
+        blob = new Blob([ipsbytearray], {type: 'application/octet-stream'})
+        document.getElementById('aIdDownloadLink').href = URL.createObjectURL(blob)
+        document.getElementById('aIdDownloadLink').download = 'randoxrotation-patches' + (new Date()).toISOString().split('T')[0] + '.ips'
+        document.getElementById('aIdDownloadLink').textContent = 'Download patch IPS (no items)'
+    }
+})
 
 </script>
     </head>
@@ -1278,7 +1385,7 @@ function updateState() {
     <p>This is not exactly a randomizer. Instead, it copies the locations of all the items from a <strong><a href="https://varia.run/">VARIA Randomizer</a></strong> ROM seed that you provide. (VARIA itself may include a rotation randomizer soon.)</p>
     <p>This:</p>
     <ul>
-        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door, & fight BT; 4. balanced suits; 5. escape-climb softlock fix; 6. down-facing gadora crash fix; 7. max ammo equip screen; 8. suit pickup restores position" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
+        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door; 4. BT wakes; 5. balanced suits; 6. escape-climb softlock fix; 7. down-facing gadora crash fix; 8. max ammo equip screen; 9. suit pickup restores position" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
         <li><strong>Does not ensure the seed is completable.</strong></li>
         <li>Will not show errors plainly yet - check your browser's console if a download link doesn't appear.</li>
         <li>Will not upload or store anything - it's all in your browser. (This means links generated are very temporary and local to this tab.)</li>
