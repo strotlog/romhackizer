@@ -253,15 +253,33 @@ function patchmain({hasRoms = true} = {}) {
         // copy all 100 item PLMs' PLM entry pointers from rando to rotation (pointer size == 2 bytes; bank $84 implied)
         // modify the in-memory copy of rotation rom in-place to save a little space
         for (address of offsetsInRomOf100ItemPlms) { // foreach (address in list of adddresses)
+            // copy the item!
             loadedroms['rotation'].allbytes[address] = loadedroms['rando'].allbytes[address]
             loadedroms['rotation'].allbytes[address+1] = loadedroms['rando'].allbytes[address+1]
 
+            // check for both types of 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
             itemcopied = loadedroms['rando'].allbytes[address] + loadedroms['rando'].allbytes[address+1]*256 // convert plm from little endian
-            // check for 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
-            if (itemcopied === 0xbae9 || itemcopied === 0xbaed) {
-                // DO OVER - because the 'nothing item plm' does not exist in sm rotation, we have to use plm id 0xb62f "Don't make PLM" instead. equivalent except no shot blocks
+            if (itemcopied === 0xbae9) {
+                // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same)
+                // because the varia 'nothing item plm' types do not exist in sm rotation, we have to instead use plm id 0xb62f "Don't make PLM". it's perfectly equivalent anyway!
                 loadedroms['rotation'].allbytes[address] = 0x2f
                 loadedroms['rotation'].allbytes[address+1] = 0xb6
+            }
+            if (itemcopied === 0xbaed) {
+                // 'nothing' shot block item.
+                // set plm id to 0xef83 "Missile tank, shot block" but we'll have it depend on a very special parameter so that it's never there
+                loadedroms['rotation'].allbytes[address] = 0x83
+                loadedroms['rotation'].allbytes[address+1] = 0xef
+                // set PLM's parameter = 0x0520 (aka its unique location ID)
+                // normally this parameter is less than about 0n160 = 0xa0. it indexes the 100 item locations of the game.
+                // the key is that we use a PLM parameter such that [0xD870+(PLM parameter >> 3)] & 1 is always set to 1 in RAM.
+                // with parameter = 0x0520, the PLM ends up reading the lowest bit of byte "$7E:D914: Loading game state" as if it were an item-found bit. this byte can be various values when loading a ceres room or landing site, maybe when escaping zebes too?
+                // when loading a room that actually has an item, this byte is always set to 5: Main.
+                // the lowest bit being 1 in that byte tells the PLM "this item was already picked up. don't be an item, just be a shot block that re-forms into pretty terrain"
+                // (varia modified start locations also set the byte's value to 5 at some point when you load in, though untested whether this happens in time before a PLM in the same room might read a 0 and thus accidentally spawn.)
+                // (also, you'd think the worst that could happen if we assumed wrong that the bit will always be 1, is that someone gets some missiles they weren't supposed to, but picking them up would actually set the lowest bit of $7E:D914, which could have unpredictable results.)
+                loadedroms['rotation'].allbytes[address+4] = 0x20
+                loadedroms['rotation'].allbytes[address+5] = 0x05
             }
             // check for race mode
             if (itemcopied === 0xef03 || itemcopied === 0xef57 || itemcopied === 0xefab) {
@@ -296,7 +314,7 @@ function patchmain({hasRoms = true} = {}) {
         //  ____________ PLM ID - or more accurately, PLM entry (definition) address in bank $84
         // |     _______ X position
         // |    |   ____ Y position
-        // |    |  |   _ Parameter - not important here but FYI, for item PLMs, Parameter is the unique ID in the $7E:D870..AF array - confusing...
+        // |    |  |   _ Parameter - not important here but FYI, for item PLMs, Parameter is the unique item location ID indexing into the $7E:D870..AF array
         // |    |  |  |
         // iiii xx yy pppp
         patches.push({address: plm['plmOffsetInRom'] + 2, type: 'overwrite',
