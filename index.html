@@ -355,17 +355,21 @@ function patchmain({hasRoms = true} = {}) {
     // replace the code where environmental damage calculation looks for gravity suit, with varia suit instead (in function $90:E9CE). gravity does nothing for enviro now:
     patches.push({address: 0x869dd, type: 'overwrite',
                   bytes: [0x01]})
+    
+    // code patch (6): fix well known vanilla menu bug (patrickjohnston.org) "Bug: $82:B4C4 should be CPX #$000C. Can't access Screw Attack without Spring Ball or Boots"
+    patches.push({address: 0x134c5, type: 'overwrite',
+                  bytes: [0x00, 0x0c].reverse()})
 
-    // code patch (6): fix rotation escape climb's PLM coordinates issues by strotlog
+    // code patch (7): fix rotation escape climb's PLM coordinates issues by strotlog
     patches.push(...fixEscapeClimb)
 
-    // code patch (7): fix crash when shooting a dying gadora (eye door) in the ceiling
+    // code patch (8): fix crash when shooting a dying gadora (eye door) in the ceiling
     patches.push(...fixRidleyAndDraygonGadoras)
 
-    // code patch (8): max ammo display by strotlog
+    // code patch (9): max ammo display by strotlog
     patches.push(...maxAmmoDisplay)
 
-    // code patch (9): suit pickup softlock prevention by strotlog
+    // code patch (10): suit pickup softlock prevention by strotlog
     patches.push(...suitPickupsNowPreserveSamusLocation)
 
     if (checkForOverlappingPatches(patches)) {
@@ -1403,7 +1407,7 @@ document.addEventListener('DOMContentLoaded', function (event) {
     <p>This is not exactly a randomizer. Instead, it copies the locations of all the items from a <strong><a href="https://varia.run/">VARIA Randomizer</a></strong> ROM seed that you provide. (VARIA itself may include a rotation randomizer soon.)</p>
     <p>This:</p>
     <ul>
-        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door; 4. BT wakes; 5. balanced suits; 6. escape-climb softlock fix; 7. down-facing gadora crash fix; 8. max ammo equip screen; 9. suit pickup restores position" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
+        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door; 4. BT wakes; 5. balanced suits; 6. screw attack menuing; 7. escape-climb softlock fix; 8. down-facing gadora crash fix; 9. max ammo equip screen; 10. suit pickup restores position" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
         <li><strong>Does not ensure the seed is completable.</strong></li>
         <li>Will not show errors plainly yet - check your browser's console if a download link doesn't appear.</li>
         <li>Will not upload or store anything - it's all in your browser. (This means links generated are very temporary and local to this tab.)</li>
