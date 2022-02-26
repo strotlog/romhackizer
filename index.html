@@ -372,6 +372,9 @@ function patchmain({hasRoms = true} = {}) {
     // code patch (10): suit pickup softlock prevention by strotlog
     patches.push(...suitPickupsNowPreserveSamusLocation)
 
+    // code patch (11): faster sm rotation intro by strotlog
+    patches.push(...fasterIntro)
+
     if (checkForOverlappingPatches(patches)) {
         return -1
     }
@@ -1189,6 +1192,185 @@ suitPickupsNowPreserveSamusLocation = [
              ].flat()},
 ]
 
+fasterIntro = [
+    //
+    // change the intro sequence, preserving the credits that were inserted by the author of sm rotation.
+    // (comment block is mostly background info; skip to the bit about $CADF toward the end of it for implementation)
+    //
+    // bank $8B contains a series of functions with relatively little documentation:
+    // game state $1E: Intro handler at $8B:A35B (shared with other game states), calls the function pointer at
+    // $7E:1F51 "Current cinematic function" every frame, plus separately calls function pointers within each cinematic object.
+    // this sole current cinematic function typically checks a condition; once met, it changes $7E:1F51 to point to the next function.
+    // here is part of the pre-ceres chain of such functions - all must be in bank $8B:
+    //   [last object of last text scene sets $7E:1F51 to point to $B72F]
+    //   $B72F -> $BCA0
+    //   ^ie, some iteration of cinematic function $8B:B72F sets $7E:1F51 to point to $(8B:)BCA0 instead of to itself
+    //   $BCA0: does ceres prep, then...
+    //   vanilla $BCA0:
+    //     ceres prep
+    //     loads ceres audio data & plays it now
+    //     $BCA0 -> $BDE4
+    //   rotation $BCA0 (rotation removes ceres here):
+    //     ceres prep
+    //     loads ceres audio data & queues playing it, but "later" = hopefully never
+    //     sets ceres-ridley = dead
+    //     sets $D914 Loading game state = 0x22: Escaping Ceres / landing on Zebes
+    //     $BCA0 -> $C5CA
+    //     ^ie, sets a different next cinematic function vs. the one set by vanilla $BCA0
+    // vanilla post-ceres chain of cinematic functions:
+    //   [ceres exploding goes down a chain of cinematic functions, eventually $C345]
+    //   ... -> $C345 -> $C5CA -> $C610 -> $C627 -> $C699 -> $C79C -> $C7CA -> $A38F (no-op. rts.)
+    //                         \
+    //                    ^^^   -> (see our modification below)
+    //                    |||
+    //                   sm rotation sets $7E:1F51 "Current cinematic function" to $C5CA early, in $BCA0,
+    //                   skipping some cinematic functions (skips $BDE4, $C345, and several functions in between).
+    //                   thus, ceres never starts or happens.
+    // most cinematic functions from $C5CA onward are the 'flying to zebes' scene, which sm rotation preserves, but we want to remove.
+    // also, the chain goes further than the above, all cinematics:
+    //   [the 'planet zebes' text object, as its own last instruction, sets $7E:1F51 to point to $C9F9]
+    //   $C9F9 -> $CA36 -> $CA85 -> $CAD0 -> $CADE (no-op. rts.)
+    //   [the Zebes Stars 5 object changes its own function pointer from $82:C8AA to $82:C8B9]
+    //   [the Zebes Stars 5 object, in its new function, checks if -128 < (stars' y-position) < 0;
+    //                              if yes, sets $7E:1F51 to point to $CADF]
+    //   $CADF -> (no next cinematic function whatsoever; $CADF transitions game state to 6 (Loading) instead, and the game state 6 handler takes over)
+    //    ^^^
+    //    |||
+    //   our modification will set $7E:1F51 "Current cinematic function" to $CADF early, in $C5CA,
+    //   skipping some cinematic functions (skips $C610, $CAFE, and several functions in between).
+    //   thus, flying-to-zebes never happens.
+    //
+    {address: 0x5c604, type: 'overwrite',
+     bytes: [0xca, 0xdf].reverse()},
+    // sm rotation does some weird modification of the loading of ceres audio data that's done in $8B:BCA0 (presumably the audio data needs to be loaded in in order to be used in flying-to-zebes, which sm rotation preserves, but we want to remove).
+    // when we land on zebes extra early like with the above change, there's some artifact still left in the audio queue that was put there by $8B:BCA0.
+    // the artifact in the queue leads to no music when the landing site is initially displayed, and to a small glitch and delay when samus disembarks.
+    // luckily, by this point (around the end of intro text), no audio is needed in any further cinematics, because we've decided there will be no further cinematics!
+    // so just NOP out the loading of audio data at the end of the intro text:
+    {address: 0x5bdd5, type: 'overwrite',
+     bytes: [0xea, 0xea, 0xea, 0xea]}, // NOP out the JSL instruction at $8B:BDD5
+    {address: 0x5bddf, type: 'overwrite',
+     bytes: [0xea, 0xea, 0xea, 0xea]}, // NOP out the JSL instruction at $8B:BDDF
+    //
+    // faster text scene (the other part of the speedup):
+    //
+    // cinematic intro text page 1 (of 1 in sm rotation): end early, skipping hundreds of 1-frame 'nothing' objects.
+    // insert a 'go to'
+    // NOTE: this modifies an entry in list of *variable-length* cinematic instructions.
+    //       therefore, if in future versions of sm rotation, something changes in this scene other than the text/duration/positioning,
+    //       this patch could crash because it might have overwritten the middle of some other instruction instead of the beginning of a new one.
+    //
+    {address: 0x64739, type: 'overwrite',
+     bytes: [
+             [0x97, 0x1e].reverse(), // 'go to/goto'. instructs to call $8B:971E. $8B:971E: Instruction - go to [[Y]]
+             [0xd5, 0xd3].reverse(), // parameter for $8B:971E. param=$8C:D5D3. target address of 'go to/goto' in bank $8C
+             ].flat()},
+    // modify the duration of final wait at the end of the text scene @ $8C:D5D3
+    // the value below can be modified again if a more ideal delay is found.
+    // (quirk: the sm rotation text page 1 ending, uses vanilla's text page 6 ending without modifying page 6 ending address)
+    {address: 0x655D5, type: 'overwrite',
+     bytes: [0x00, 0x1e].reverse()}, // change delay from 0x0080 to 0x001e frames
+    // the rest: make the text print faster @ $8c:c383 data
+    //           - the object data is already modified by sm rotation, we modify it further
+    //           - implemented as many single-byte modifications:
+    //             - this avoids overwriting the letters & their positions in future sm rotation updates
+    //           - this could be generated here in a loop in our code, but that would be less portable if patches change language in future
+    // every 6 bytes from 0x6438B (an object for the letter 'S') through 0x6454D (a 'C') (inclusive): set to 2 frames instead of 5 frames
+    {address: 0x6438b, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64391, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64397, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6439d, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643a3, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643a9, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643af, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643b5, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643bb, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643c1, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643c7, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643cd, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643d3, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643d9, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643df, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643e5, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643eb, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643f1, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643f7, type: 'overwrite', bytes: [0x02]},
+    {address: 0x643fd, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64403, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64409, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6440f, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64415, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6441b, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64421, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64427, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6442d, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64433, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64439, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6443f, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64445, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6444b, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64451, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64457, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6445d, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64463, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64469, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6446f, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64475, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6447b, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64481, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64487, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6448d, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64493, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64499, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6449f, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644a5, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644ab, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644b1, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644b7, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644bd, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644c3, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644c9, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644cf, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644d5, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644db, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644e1, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644e7, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644ed, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644f3, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644f9, type: 'overwrite', bytes: [0x02]},
+    {address: 0x644ff, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64505, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6450b, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64511, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64517, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6451d, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64523, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64529, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6452f, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64535, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6453b, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64541, type: 'overwrite', bytes: [0x02]},
+    {address: 0x64547, type: 'overwrite', bytes: [0x02]},
+    {address: 0x6454d, type: 'overwrite', bytes: [0x02]},
+    // every 6 bytes from 0x64553 (an object for the letter 'T') through 0x64589 (a 'O') (inclusive): set to 3 frames instead of 5 frames
+    {address: 0x64553, type: 'overwrite', bytes: [0x03]},
+    {address: 0x64559, type: 'overwrite', bytes: [0x03]},
+    {address: 0x6455f, type: 'overwrite', bytes: [0x03]},
+    {address: 0x64565, type: 'overwrite', bytes: [0x03]},
+    {address: 0x6456b, type: 'overwrite', bytes: [0x03]},
+    {address: 0x64571, type: 'overwrite', bytes: [0x03]},
+    {address: 0x64577, type: 'overwrite', bytes: [0x03]},
+    {address: 0x6457d, type: 'overwrite', bytes: [0x03]},
+    {address: 0x64583, type: 'overwrite', bytes: [0x03]},
+    {address: 0x64589, type: 'overwrite', bytes: [0x03]},
+    // every 6 bytes from 0x6458F (an object for the letter 'R') through 0x6459B (a 'U') (inclusive): set to 3 frames instead of 5 frames
+    {address: 0x6458f, type: 'overwrite', bytes: [0x03]},
+    {address: 0x64595, type: 'overwrite', bytes: [0x03]},
+    {address: 0x6459b, type: 'overwrite', bytes: [0x03]}
+    // (last 7 characters are left as 5 frames so that the typing sound doesn't last for a long time after all the letters have appeared)
+]
+
+
 function willAwakeningPatchWork(romBytes) {
 
     // this rom-reading is very unlikely to be necessary, but it's fun. cordon off into sub-function
@@ -1407,7 +1589,7 @@ document.addEventListener('DOMContentLoaded', function (event) {
     <p>This is not exactly a randomizer. Instead, it copies the locations of all the items from a <strong><a href="https://varia.run/">VARIA Randomizer</a></strong> ROM seed that you provide. (VARIA itself may include a rotation randomizer soon.)</p>
     <p>This:</p>
     <ul>
-        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door; 4. BT wakes; 5. balanced suits; 6. screw attack menuing; 7. escape-climb softlock fix; 8. down-facing gadora crash fix; 9. max ammo equip screen; 10. suit pickup restores position" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
+        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door; 4. BT wakes; 5. balanced suits; 6. screw attack menuing; 7. escape-climb softlock fix; 8. down-facing gadora crash fix; 9. max ammo equip screen; 10. suit pickup restores position; 11. faster intro" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
         <li><strong>Does not ensure the seed is completable.</strong></li>
         <li>Will not show errors plainly yet - check your browser's console if a download link doesn't appear.</li>
         <li>Will not upload or store anything - it's all in your browser. (This means links generated are very temporary and local to this tab.)</li>
