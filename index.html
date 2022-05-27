@@ -292,7 +292,9 @@ function patchmain({hasRoms = true} = {}) {
         }
     }
 
-    // everything else we do to the ROM should via this array, in the format {address: ..., type, ..., bytes: ...}
+    // everything else we do to the ROM should be via this array, in the format:
+    //   {address: ..., type, ..., bytes: ...},
+    // so that we can do checks on it and optionally export it
     patches = []
 
     // 96 out of 100 items work great with the above.
@@ -1503,6 +1505,7 @@ function willAwakeningPatchWork(romBytes) {
 loadedroms = {}
 
 function addRomFiles(purpose, filesarr) {
+
     if (filesarr.length === 0) {
         return
     }
@@ -1522,6 +1525,8 @@ function addRomFiles(purpose, filesarr) {
     fr.readAsArrayBuffer(filesarr[0])
 }
 
+let g_completed = false
+
 function updateState() {
     if ('rotation' in loadedroms) {
         document.getElementById('spanIdRotationRomFilename').textContent = loadedroms['rotation'].filename
@@ -1535,18 +1540,106 @@ function updateState() {
             console.log('Rotation ROM provided is only ' + loadedroms['rotation'].allbytes.length + ' bytes, expected over ' + 3*1024*1024)
             return
         }
-        if (loadedroms['rando'].allbytes.length < 2*1024*1024) {
-            console.log('Rando ROM provided is only ' + loadedroms['rando'].allbytes.length + ' bytes, expected ' + 3*1024*1024 + ' or more')
-            return
+        if (loadedroms['rando'].filename.endsWith('.apsm')) {
+            if (g_completed) {
+                console.log('Please reload the page before doing Archipelago') // because we need that rotation data to be pristine to read the bsdiff correctly
+                return
+            }
+            g_completed = true
+            ret = archipelagoRidiculum()
+        } else {
+            if (loadedroms['rando'].allbytes.length < 2*1024*1024) {
+                console.log('Rando ROM provided is only ' + loadedroms['rando'].allbytes.length + ' bytes, expected ' + 3*1024*1024 + ' or more')
+                return
+            }
+            g_completed = true
+            ret = patchmain({hasRoms: true})
+            if (ret != 0) { return }
+            updateDownload('SM Rotation with items copied from ' + loadedroms['rando'].filname,
+                           loadedroms['rotation'].allbytes,
+                           'Download Modified SM: Rotation')
         }
-        ret = patchmain({hasRoms: true})
-        if (ret != 0) { return }
-
-        let blob = new Blob([loadedroms['rotation'].allbytes], {type: 'application/octet-stream'})
-        document.getElementById('aIdDownloadLink').href = URL.createObjectURL(blob)
-        document.getElementById('aIdDownloadLink').download = 'SM Rotation with items copied from ' + loadedroms['rando'].filename
-        document.getElementById('aIdDownloadLink').textContent = 'Download Modified SM: Rotation'
     }
+}
+
+function updateDownload(filename, bytes, linktext) {
+    let blob = new Blob([bytes], {type: 'application/octet-stream'})
+    document.getElementById('aIdDownloadLink').href = URL.createObjectURL(blob)
+    document.getElementById('aIdDownloadLink').download = filename
+    document.getElementById('aIdDownloadLink').textContent = linktext
+}
+
+function archipelagoRidiculum() {
+
+    loadedroms['apsm'] = loadedroms['rando'] // not really a ROM in any case
+
+    requirejs.config({
+        appDir: ".",
+        baseUrl: '.',
+        paths: {
+            'compressjs' : ["https://cdn.jsdelivr.net/npm/compressjs@1.0.3"],
+            'js-yaml'    : ["https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist"],
+        },
+    });
+    requirejs(['compressjs/main.min' /* requirejs will expands 'compressjs' before slash to become the URL directory we specified in 'paths', and will append '.js' to the end */,
+               'js-yaml/js-yaml.min',
+               'archipelago' /* ie, ./archipelago.js which must be written in a requirejs module-y way */,
+               ], function(compressjs, jsyaml, archipelago) {
+        console.log('loaded requirements')
+        cjs = compressjs
+        jsy = jsyaml
+        archi = archipelago
+        fetch("https://raw.githubusercontent.com/strotlog/SMBasepatch/remote_and_rotation_support/build/romhacks/smrotation/multiworld-basepatch.ips").then(
+            (response) => response.blob()).then(
+            (basepatch_blob) => basepatch_blob.arrayBuffer()).then(function (basepatch_arraybuffer) {
+                console.log('fetched ips')
+                let basepatch_ips = new Uint8Array(basepatch_arraybuffer)
+                let basepatch = readips(basepatch_ips)
+                basepatch.push(...(patchmain({hasRoms: false}))) // pretty much all the patches aside from the bsdiff itself
+                checkForOverlappingPatches(basepatch)
+                let finished_apsm = archi.archipelagomagic(loadedroms['apsm'].allbytes,
+                                                           basepatch,
+                                                           loadedroms['rotation'].allbytes,
+                                                           offsetsInRomOf100ItemPlms,
+                                                           'rotation')
+                let arraybuffer = new ArrayBuffer(finished_apsm.buffer, finished_apsm.byteOffset, finished_apsm.byteLength)
+                updateDownload('Rotated ' + loadedroms['apsm'].filename,
+                               finished_apsm,
+                               'Download Rotated AP Multiworld World (beta)')
+
+            }) //.catch(error => console.log(error)) // better to have the debugger catch it
+    })
+
+
+    return 0
+}
+
+function readips(binary) {
+    let ret = []
+    let i = 5
+    while (i < binary.length-3) {
+        let address = binary[i] * 65536 + binary[i+1] * 256 + binary[i+2]
+        let length = binary[i+3] * 256 + binary[i+4]
+        if (length == 0) {
+            let rlelength = binary[i+5] * 256 + binary[i+6]
+            let rlebyte = binary[i+7]
+            let bytearr = new Uint8Array(rlelength)
+            for (j = 0; j < rlelength; j++) {
+                bytearr[j] = rlebyte
+            }
+            ret.push({address: address, type: 'overwrite',
+                      bytes: bytearr})
+            i += 7 + rlelength
+        } else {
+            ret.push({address: address, type: 'overwrite',
+                      bytes: binary.slice(i+5, i+5+length)})
+            i += 5 + length
+        }
+    }
+    if (i != binary.length - 3) {
+        console.log('ips failed to parse! length=' + binary.length)
+    }
+    return ret
 }
 
 document.addEventListener('DOMContentLoaded', function (event) {
@@ -1613,4 +1706,12 @@ document.addEventListener('DOMContentLoaded', function (event) {
         </h3>
     </div>
 </body>
+<!-- requirejs is very, well, required, for the archipelago code path. global <script> js code does not run after this point! -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js">
+<script>
+    // dummy code that never runs, just here to demonstrate and warn the maintainer of this.
+    // require.min.js messes with the DOM at the point that it's included.
+    console.log('should not see me, i don\'t run')
+</script>
 </html>
+
