@@ -399,7 +399,7 @@ class bsdiff {
 
     updatetoadjacentchunk(i, outputaddress) {
         let j = 0
-        for (j = i-1; 0 <= j && j <= i+2; j++) {
+        for (j = i-1; 0 <= j && j <= i+2 && j < this.chunks.length; j++) {
             if (this.chunks[j].outputaddress <= outputaddress &&
                                                 outputaddress < this.chunks[j].outputaddress + this.chunks[j].length) {
                 break

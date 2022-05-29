@@ -1528,18 +1528,39 @@ function addRomFiles(purpose, filesarr) {
 let g_completed = false
 
 function updateState() {
-    if ('rotation' in loadedroms) {
-        document.getElementById('spanIdRotationRomFilename').textContent = loadedroms['rotation'].filename
-    }
     if ('rando' in loadedroms) {
         document.getElementById('spanIdRandoRomFilename').textContent = loadedroms['rando'].filename
     }
-    if ('rotation' in loadedroms && 'rando' in loadedroms) {
+    if ('vanilla' in loadedroms) {
+        document.getElementById('spanIdVanillaRomFilename').textContent = loadedroms['vanilla'].filename
+    }
+    if ('romhackIps' in loadedroms) {
+        document.getElementById('spanIdRomhackIpsFilename').textContent = loadedroms['romhackIps'].filename
+    }
+    if ('rando' in loadedroms && 'vanilla' in loadedroms && 'romhackIps' in loadedroms) {
         document.getElementById('aIdDownloadLink').textContent = '' // remove link (if any previous one was shown)
-        if (loadedroms['rotation'].allbytes.length < 2*1024*1024) {
-            console.log('Rotation ROM provided is only ' + loadedroms['rotation'].allbytes.length + ' bytes, expected over ' + 3*1024*1024)
+        if (loadedroms['vanilla'].allbytes.length < 2*1024*1024) {
+            console.log('Vanilla SM ROM provided is only ' + loadedroms['vanilla'].allbytes.length + ' bytes, expected ' + 3*1024*1024 + ' (3MB)')
             return
         }
+        const rotationSize = 3*1024*1024 + 2*0x8000
+        loadedroms['rotation'] = {filename: 'Super Metroid Rotation.sfc',
+                                  allbytes: new Uint8Array(rotationSize),
+                                  }
+        for (let i = 0; i < loadedroms['vanilla'].allbytes.length; i++) {
+            // copy vanilla to a new ROM
+            loadedroms['rotation'].allbytes[i] = loadedroms['vanilla'].allbytes[i]
+        }
+        for (let i = 3*1024*1024; i < rotationSize; i++) {
+            // extend ROM to correct romhack size
+            loadedroms['rotation'].allbytes[i] = 0xff
+        }
+        // create romhack
+        romhackmod = readips(loadedroms['romhackIps'].allbytes)
+        if (romhackmod.length == 0) { //failed
+            return
+        }
+        applyPatch(romhackmod)
         if (loadedroms['rando'].filename.endsWith('.apsm')) {
             if (g_completed) {
                 console.log('Please reload the page before doing Archipelago') // because we need that rotation data to be pristine to read the bsdiff correctly
@@ -1555,7 +1576,7 @@ function updateState() {
             g_completed = true
             ret = patchmain({hasRoms: true})
             if (ret != 0) { return }
-            updateDownload('SM Rotation with items copied from ' + loadedroms['rando'].filname,
+            updateDownload('SM Rotation with items copied from ' + loadedroms['rando'].filename,
                            loadedroms['rotation'].allbytes,
                            'Download Modified SM: Rotation')
         }
@@ -1629,7 +1650,7 @@ function readips(binary) {
             }
             ret.push({address: address, type: 'overwrite',
                       bytes: bytearr})
-            i += 7 + rlelength
+            i += 8
         } else {
             ret.push({address: address, type: 'overwrite',
                       bytes: binary.slice(i+5, i+5+length)})
@@ -1637,7 +1658,8 @@ function readips(binary) {
         }
     }
     if (i != binary.length - 3) {
-        console.log('ips failed to parse! length=' + binary.length)
+        console.log('ips failed to parse! i=' + i + ', length=' + binary.length)
+        return []
     }
     return ret
 }
@@ -1694,11 +1716,17 @@ document.addEventListener('DOMContentLoaded', function (event) {
         <input type='button' id='inputIdRandoRomButton' value='Browse' onclick="document.getElementById('inputIdRandoRom').click()"/>
         <span id='spanIdRandoRomFilename'>(No file)</span>
     </div>
-    <div id='divIdRotationRomArea' style='border: 1px; border-style: dotted' ondrop="event.preventDefault(); addRomFiles('rotation', event.dataTransfer.files)">
-        <h3>Vanilla Rotation ROM</h3>
-        <input type='file' id='inputIdRotationRom' style='display:none' onchange="addRomFiles('rotation', this.files)"/>
-        <input type='button' id='inputIdRotationRomButton' value='Browse' onclick="document.getElementById('inputIdRotationRom').click()"/>
-        <span id='spanIdRotationRomFilename'>(No file)</span>
+    <div id='divIdVanillaRomArea' style='border: 1px; border-style: dotted' ondrop="event.preventDefault(); addRomFiles('vanilla', event.dataTransfer.files)">
+        <h3>Vanilla Super Metroid ROM (unheadered)</h3>
+        <input type='file' id='inputIdVanillaRom' style='display:none' onchange="addRomFiles('vanilla', this.files)"/>
+        <input type='button' id='inputIdVanillaRomButton' value='Browse' onclick="document.getElementById('inputIdVanillaRom').click()"/>
+        <span id='spanIdVanillaRomFilename'>(No file)</span>
+    </div>
+    <div id='romhackIpsArea' style='border: 1px; border-style: dotted' ondrop="event.preventDefault(); addRomFiles('romhackIps', event.dataTransfer.files)">
+        <h3>Rotation Hack IPS</h3>
+        <input type='file' id='inputIdRomhackIps' style='display:none' onchange="addRomFiles('romhackIps', this.files)"/>
+        <input type='button' id='inputIdRomhackIpsButton' value='Browse' onclick="document.getElementById('inputIdRomhackIps').click()"/>
+        <span id='spanIdRomhackIpsFilename'>(No file)</span>
     </div>
     <div>
         <h3>
