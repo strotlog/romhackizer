@@ -12,13 +12,17 @@ define(['require', 'compressjs/main.min', 'js-yaml/js-yaml.min'],
     module_jsyaml = _jsyaml
 
     return {
-        archipelagomagic: function(apsm, modifications, vanillaRomhack, offsetsInRomOf100ItemPlms, hackname) {
-            ap = new archipelagoclass(apsm, modifications, vanillaRomhack, offsetsInRomOf100ItemPlms, hackname)
+        archipelagomagic: function(apsm,
+                                   modifications /* note, order is important in case of overlaps */,
+                                   vanillaSm,
+                                   offsetsInRomOf100ItemPlms,
+                                   hackname) {
+            ap = new archipelagoclass(apsm, modifications, vanillaSm, offsetsInRomOf100ItemPlms, hackname)
             this.ap = ap
             ap.extractApsmData()
             ap.expandRom()
-            ap.copy100PlmsAndNothings()
             ap.applyModifications()
+            ap.copy100PlmsAndNothings()
             ap.copyLimitedApsmData()
             return ap.copyRandoToZip()
         },
@@ -26,46 +30,49 @@ define(['require', 'compressjs/main.min', 'js-yaml/js-yaml.min'],
 })
 
 class archipelagoclass {
-    constructor(apsm, modifications, vanillaRomhack, offsetsInRomOf100ItemPlms, hackname) {
+    constructor(apsm,
+                modifications,
+                vanillaSm,
+                offsetsInRomOf100ItemPlms,
+                hackname) {
+
         this.apsm = apsm
         this.modifications = modifications
-        this.vanillaRomhack = vanillaRomhack
+        this.vanillaSm = vanillaSm
         this.offsetsInRomOf100ItemPlms = offsetsInRomOf100ItemPlms
         this.hackname = hackname
         this.name = 'archipelago'
         this.zip = new zipfile0(this.apsm, "delta.bsdiff4")
     }
 
+    extractApsmData() {
+        let bsfile = this.zip.extract()
+        this.bsdiff_from_ap = new bsdiff(bsfile)
+        this.bsdiff_from_ap.processInitialDiff()
+        this.bsdiff_apromhacked = new bsdiff([])
+        this.bsdiff_apromhacked.initializeFromSharedOriginalFile(this.vanillaSm)
+    }
+
     expandRom() {
         if (this.hackname == 'rotation') {
-            this.bsdiff_romhack_toberandoed.expandtosize(romSize_Rotation, 0xff)
+            this.bsdiff_apromhacked.expandtosize(romSize_Rotation, 0xff)
         } else {
             console.log('unknown hackname "' + this.hackname + '" in expandRom')
         }
     }
 
-    extractApsmData() {
-        let bsfile = this.zip.extract()
-        this.bsdiff_rando = new bsdiff(bsfile)
-        this.bsdiff_rando.processInitialDiff()
-        // ehh.. we could conceivably someday modify the bsdiff in-place, but we'd kind of need to apply the whole romhack ips. right now, we have rotation, and the player has vanilla. so use bsdiff_rando as read-only
-        this.bsdiff_romhack_toberandoed = new bsdiff([])
-        this.bsdiff_romhack_toberandoed.initializeForFullOverwrite(this.vanillaRomhack) // will ignore the player's vanilla game
-    }
-
     copy100PlmsAndNothings() {
         for (const address of this.offsetsInRomOf100ItemPlms) {
-            // see patchmain in other file for comments
-            let plm = this.bsdiff_rando.read({baseFile: this.vanillaRomhack /* close enough to vanilla */}, address, 2)
-            // note, this may be overwriting this.vanillaRomhack buffer, so the original data for this address is no longer readable after this point (as it requires mixing with this.vanillaRomhack)
-            this.bsdiff_romhack_toberandoed.overwrite(address, plm)
+            let plm = this.bsdiff_from_ap.read(this.vanillaSm /* basis of the bsdiff */, address, 2)
+            this.bsdiff_apromhacked.overwrite(address, plm)
             let itemcopied = plm[0] + plm[1]*256
+            // see patchmain in other file for comments detailing PLM codes
             if (itemcopied == 0xbae9) {
-                this.bsdiff_romhack_toberandoed.overwrite(address, [0x2f, 0xb6]) // 'nothing' chozo or 'nothing' in the open
+                this.bsdiff_apromhacked.overwrite(address, [0x2f, 0xb6]) // 'nothing' chozo or 'nothing' in the open
             }
             if (itemcopied == 0xbaed) {
-                this.bsdiff_romhack_toberandoed.overwrite(address, [0x83, 0xef]) // 'nothing' shot block
-                this.bsdiff_romhack_toberandoed.overwrite(address+4, [0x20, 0x05]) // hackery to avoid new PLM (see patchmain comments)
+                this.bsdiff_apromhacked.overwrite(address, [0x83, 0xef]) // 'nothing' shot block
+                this.bsdiff_apromhacked.overwrite(address+4, [0x20, 0x05]) // hackery to avoid new PLM (see patchmain comments)
             }
             if (itemcopied == 0) {
                 console.log('Error: we read PLM value of 0 (should be a ROM pointer) @ rom offset 0x' + address.toString(16))
@@ -74,8 +81,8 @@ class archipelagoclass {
     }
 
     applyModifications() {
-        for (const modification of this.modifications) {
-            this.bsdiff_romhack_toberandoed.overwrite(modification.address, modification.bytes)
+        for (const modification of this.modifications.flat() /* flat: allow caller to specify as array of arrays */) {
+            this.bsdiff_apromhacked.overwrite(modification.address, modification.bytes)
         }
     }
 
@@ -111,13 +118,14 @@ class archipelagoclass {
                     arr[i] = entry.vanilla
                 }
             }
-            let data = this.bsdiff_rando.read({bufferAtThisAddress: arr, fallbackBaseFile: this.vanillaRomhack}, romOffsetFromSnesAddrString(entry.old), entry.length)
-            this.bsdiff_romhack_toberandoed.overwrite(romOffsetFromSnesAddrString(entry.new), data)
+            // note, once data at an address is written, the original cannot be read again.
+            let data = this.bsdiff_from_ap.read(this.vanillaSm, romOffsetFromSnesAddrString(entry.old), entry.length)
+            this.bsdiff_apromhacked.overwrite(romOffsetFromSnesAddrString(entry.new), data)
         }
     }
 
     copyRandoToZip() {
-        return this.zip.replacefile(this.bsdiff_romhack_toberandoed.repack())
+        return this.zip.replacefile(this.bsdiff_apromhacked.repack())
     }
 
 }
@@ -309,29 +317,25 @@ function crc32(data) {
 
 // allows reading and live modification of a bsdiff file - though live modification is untested
 class bsdiff {
-    constructor(data) {
-        this.data = data
+    constructor(encodeddata) {
+        this.encodeddata = encodeddata
         this.name = 'bsdiff'
-    }
-
-    initializeForFullOverwrite(romhackBytes) { // alternative bsdiff which is not a diff at all, but raw new data for file replacement
-        this.chunks = [{source: 'write', outputaddress: 0, length: romhackBytes.length, data: romhackBytes}]
     }
 
     processInitialDiff() {
         // https://openpreservation.org/system/files/bsdiff-4.0-documentation-colin-percival-bsd-licensed.pdf
         // these ints are 64-bit, but let's be reasonable and just do 4GB max compressed size lol
-        let controlSize = (this.data[ 8]      ) +
-                          (this.data[ 9] <<  8) +
-                          (this.data[10] << 16) +
-                          (this.data[11] << 24)
-        let diffSize =    (this.data[16]      ) +
-                          (this.data[17] <<  8) +
-                          (this.data[18] << 16) +
-                          (this.data[19] << 24)
-        let controlBytes = module_compressjs.Bzip2.decompressFile(this.data.slice(32, 32 + controlSize))
-        this.diffBytes =   module_compressjs.Bzip2.decompressFile(this.data.slice(32 + controlSize, 32 + controlSize + diffSize))
-        this.extraBytes =  module_compressjs.Bzip2.decompressFile(this.data.slice(32 + controlSize + diffSize, this.data.length))
+        let controlSize = (this.encodeddata[ 8]      ) +
+                          (this.encodeddata[ 9] <<  8) +
+                          (this.encodeddata[10] << 16) +
+                          (this.encodeddata[11] << 24)
+        let diffSize =    (this.encodeddata[16]      ) +
+                          (this.encodeddata[17] <<  8) +
+                          (this.encodeddata[18] << 16) +
+                          (this.encodeddata[19] << 24)
+        let controlBytes = module_compressjs.Bzip2.decompressFile(this.encodeddata.slice(32, 32 + controlSize))
+        this.diffBytes =   module_compressjs.Bzip2.decompressFile(this.encodeddata.slice(32 + controlSize, 32 + controlSize + diffSize))
+        this.extraBytes =  module_compressjs.Bzip2.decompressFile(this.encodeddata.slice(32 + controlSize + diffSize, this.encodeddata.length))
         let readptr = 0
         let diffptr = 0
         let extraptr = 0
@@ -372,6 +376,14 @@ class bsdiff {
         }
     }
 
+    // alternative init for a totally new patch (alternative to processInitialDiff())
+    initializeFromSharedOriginalFile(vanillaBytes) {
+        //this.chunks = [{source: 'write', outputaddress: 0, length: vanillaBytes.length, data: vanillaBytes}]
+        this.diffBytes = new Uint8Array(vanillaBytes.length) // auto zero-initialized
+        this.extraBytes = new Uint8Array(0)
+        this.chunks = [{source: 'mix', outputaddress: 0, length: this.diffBytes.length, readptr: 0, diffptr: 0}]
+    }
+
     expandtosize(newsize, fillbyte) {
         let currentlength = this.chunks[this.chunks.length-1].outputaddress + this.chunks[this.chunks.length-1].length
         const /* in size */ expansion = new Uint8Array(newsize - currentlength)
@@ -408,16 +420,10 @@ class bsdiff {
         return j
     }
 
-    read({bufferAtThisAddress, baseFile, fallbackBaseFile}, outputaddress, length) {
+    read(baseFile, outputaddress, length) {
         let ret = []
         let i = this.binarysearch(outputaddress)
         let offsetinchunk = outputaddress - this.chunks[i].outputaddress
-        let readbuffer
-        if (bufferAtThisAddress != null) {
-            readbuffer = bufferAtThisAddress
-        } else {
-            readbuffer = baseFile // full file access
-        }
         while (ret.length < length) {
             let chunklimit = outputaddress + length
             if (chunklimit > this.chunks[i].outputaddress + this.chunks[i].length) {
@@ -429,33 +435,10 @@ class bsdiff {
                 }
             } else if (this.chunks[i].source == 'mix') {
                 let diffstart = this.chunks[i].diffptr + offsetinchunk
-                let readstart
-                if (bufferAtThisAddress != null) {
-                    if (this.chunks[i].readptr == this.chunks[i].outputaddress) {
-                        readbuffer = bufferAtThisAddress
-                        readstart = ret.length
-                    } else {
-                        readbuffer = fallbackBaseFile
-                        readstart = this.chunks[i].readptr + offsetinchunk
-                        console.log('warning: readptr 0x' + this.chunks[i].readptr.toString(16) +
-                                    ' differs from target address 0x' + this.chunks[i].outputaddress.toString(16) +
-                                    ' (chunk ' + i + '), ignoring bufferAtThisAddress and falling back' +
-                                    ' on fallbackBaseFile which may be wrong')
-                        if (fallbackBaseFile == null) {
-                            console.log('error: fallbackBaseFile is null!')
-                        }
-                    }
-                } else {
-                    if (this.chunks[i].readptr != this.chunks[i].outputaddress) {
-                        console.log('warning: readptr 0x' + this.chunks[i].readptr.toString(16) +
-                                    ' differs from target address 0x' + this.chunks[i].outputaddress.toString(16) +
-                                    ' (chunk ' + i + '), baseFile data is being read in a possibly unexpected location')
-                    }
-                    readstart = this.chunks[i].readptr + offsetinchunk
-                }
+                let readstart = this.chunks[i].readptr + offsetinchunk
                 for (let j = 0; j + offsetinchunk + this.chunks[i].outputaddress < chunklimit; j++) {
                     // mix
-                    ret.push((readbuffer[readstart + j] + this.diffBytes[diffstart + j]) & 0xff)
+                    ret.push((baseFile[readstart + j] + this.diffBytes[diffstart + j]) & 0xff)
                 }
             } else if (this.chunks[i].source == 'extra') {
                 let extrastart = this.chunks[i].extraptr + offsetinchunk
@@ -478,15 +461,15 @@ class bsdiff {
                 chunklimit = outputaddress + data.length
             }
             // no merging chunks, just overwrite existing chunks and split if needed
-            this.overwritetochunk(i, outputaddress+position, data.slice(position, chunklimit - (outputaddress + position)))
+            this.overwritetochunk(i, outputaddress+position, data.slice(position, chunklimit - outputaddress))
             position = chunklimit - outputaddress
             i = this.updatetoadjacentchunk(i, outputaddress + position)
         }
     }
+    // helper function:
     overwritetochunk(i, outputaddress, data) {
         if (this.chunks[i].source == 'write') {
             // overwrite part of existing 'write' chunk
-            let newarr = []
             let startPosInChunkData = outputaddress - this.chunks[i].outputaddress
             for (let position = 0;
                  position < data.length && (position + startPosInChunkData) < this.chunks[i].length;
@@ -494,36 +477,41 @@ class bsdiff {
                 this.chunks[i].data[position + startPosInChunkData] = data[position]
             }
         } else if (outputaddress == this.chunks[i].outputaddress) {
+            // note, not implemented: exact replacement of a chunk. instead we'll just set the original chunk's length to 0 (which this class allows) and insert a new one. fewer code paths!
             // overwrite beginning of a chunk => 1 new chunk
-            this.chunks.splice(i, 0, {source: 'write', length: data.length, outputaddress: outputaddress, data: data})
+            this.chunks.splice(i, 0, {source: 'write', length: data.length, outputaddress: outputaddress, data: data, createdby: 'beginchunk'})
             i++
             this.chunks[i].length -= data.length // .length == 0 is allowed
             if (this.chunks[i].source == 'mix') {
                 this.chunks[i].readptr += data.length // skip bytes
                 this.chunks[i].diffptr += data.length // skip bytes
+                this.chunks[i].outputaddress += data.length // skip bytes
             } else { // 'extra'
                 this.chunks[i].extraptr += data.length // skip bytes
+                this.chunks[i].outputaddress += data.length // skip bytes
             }
-        } else if (ouptputaddress + data.length == this.chunks[i].outputaddress + this.chunks[i].data.length) {
+        } else if (outputaddress + data.length == this.chunks[i].outputaddress + this.chunks[i].length) {
             // overwrite end of a chunk => 1 new chunk
-            this.chunks.splice(i+1, 0, {source: 'write', length: data.length, outputaddress: outputaddress, data: data})
+            this.chunks.splice(i+1, 0, {source: 'write', length: data.length, outputaddress: outputaddress, data: data, createdby:'endofchunk'})
             this.chunks[i].length -= data.length
         } else {
             // overwrite the middle of a chunk => 2 new chunks
             let splitfinalchunklength = (this.chunks[i].outputaddress + this.chunks[i].length) - (outputaddress + data.length)
-            this.chunks.splice(i+1, 0, {source: 'write', outputaddress: outputaddress, length: data.length, data: data})
+            this.chunks.splice(i+1, 0, {source: 'write', outputaddress: outputaddress, length: data.length, data: data, createdby:'midchunk' })
             this.chunks[i].length = outputaddress - this.chunks[i].outputaddress
             if (this.chunks[i].source == 'mix') {
                 this.chunks.splice(i+2, 0, {source: 'mix',
                                             outputaddress: outputaddress + data.length, 
                                             length: splitfinalchunklength,
                                             readptr: this.chunks[i].readptr + this.chunks[i].length + data.length,
-                                            diffptr: this.chunks[i].diffptr + this.chunks[i].length + data.length})
+                                            diffptr: this.chunks[i].diffptr + this.chunks[i].length + data.length,
+                                            createdby: 'postmidchunk'})
             } else { // 'extra'
-                this.chunks.splice(i+2, 0, {source: 'mix',
+                this.chunks.splice(i+2, 0, {source: 'extra',
                                             outputaddress: outputaddress + data.length, 
                                             length: splitfinalchunklength,
-                                            extraptr: this.chunks[i].extraptr + this.chunks[i].length + data.length})
+                                            extraptr: this.chunks[i].extraptr + this.chunks[i].length + data.length,
+                                            createdby: 'postmidchunk'})
             }
         }
     }
@@ -540,10 +528,10 @@ class bsdiff {
                 if (chunk.source == 'write' || chunk.source == 'extra') {
                     if (chunk.source == 'write') {
                         for (let j = 0; j < chunk.data.length; j++) {
-                            extradata.push(chunk.data[j]) // too large to push(...chunk.data) - stack overflows
+                            extradata.push(chunk.data[j]) // too large to push(...chunk.data) in one go without a loop - stack would overflow
                         }
                     } else { // 'extra'
-                        for (let j = chunk.extraptr; j < chunk.extraptr.length; j++) {
+                        for (let j = chunk.extraptr; j < chunk.extraptr + chunk.length; j++) {
                             extradata.push(this.extraBytes[j])
                         }
                     }

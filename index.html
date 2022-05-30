@@ -1543,24 +1543,6 @@ function updateState() {
             console.log('Vanilla SM ROM provided is only ' + loadedroms['vanilla'].allbytes.length + ' bytes, expected ' + 3*1024*1024 + ' (3MB)')
             return
         }
-        const rotationSize = 3*1024*1024 + 2*0x8000
-        loadedroms['rotation'] = {filename: 'Super Metroid Rotation.sfc',
-                                  allbytes: new Uint8Array(rotationSize),
-                                  }
-        for (let i = 0; i < loadedroms['vanilla'].allbytes.length; i++) {
-            // copy vanilla to a new ROM
-            loadedroms['rotation'].allbytes[i] = loadedroms['vanilla'].allbytes[i]
-        }
-        for (let i = 3*1024*1024; i < rotationSize; i++) {
-            // extend ROM to correct romhack size
-            loadedroms['rotation'].allbytes[i] = 0xff
-        }
-        // create romhack
-        romhackmod = readips(loadedroms['romhackIps'].allbytes)
-        if (romhackmod.length == 0) { //failed
-            return
-        }
-        applyPatch(romhackmod)
         if (loadedroms['rando'].filename.endsWith('.apsm')) {
             if (g_completed) {
                 console.log('Please reload the page before doing Archipelago') // because we need that rotation data to be pristine to read the bsdiff correctly
@@ -1573,6 +1555,28 @@ function updateState() {
                 console.log('Rando ROM provided is only ' + loadedroms['rando'].allbytes.length + ' bytes, expected ' + 3*1024*1024 + ' or more')
                 return
             }
+            // do original functionality: move items from rando rom to romhack and patch the romhack
+            // first we have to create an in-browser-memory copy of the romhack rom
+            const rotationSize = 3*1024*1024 + 2*0x8000
+            loadedroms['rotation'] = {filename: 'Super Metroid Rotation.sfc',
+                                      allbytes: new Uint8Array(rotationSize),
+                                      }
+            for (let i = 0; i < loadedroms['vanilla'].allbytes.length; i++) {
+                // copy vanilla to a new ROM
+                loadedroms['rotation'].allbytes[i] = loadedroms['vanilla'].allbytes[i]
+            }
+            for (let i = 3*1024*1024; i < rotationSize; i++) {
+                // extend ROM to correct romhack size
+                loadedroms['rotation'].allbytes[i] = 0xff
+            }
+            // create romhack
+            romhackmod = readips(loadedroms['romhackIps'].allbytes)
+            if (romhackmod.length == 0) { // invalid ips
+                return
+            }
+            applyPatch(romhackmod)
+
+            // everything looks good, do main functionality
             g_completed = true
             ret = patchmain({hasRoms: true})
             if (ret != 0) { return }
@@ -1616,11 +1620,36 @@ function archipelagoRidiculum() {
                 console.log('fetched ips')
                 let basepatch_ips = new Uint8Array(basepatch_arraybuffer)
                 let basepatch = readips(basepatch_ips)
-                basepatch.push(...(patchmain({hasRoms: false}))) // pretty much all the patches aside from the bsdiff itself
-                checkForOverlappingPatches(basepatch)
+                if (basepatch.length == 0) {
+                    console.log('failed to process basepatch')
+                    return -1
+                }
+                let localpatches = patchmain({hasRoms: false})
+                // see if basepatch overlaps with our local patches that are specific to randoing this romhack
+                let combinedpatches = []
+                combinedpatches.push(...basepatch)
+                combinedpatches.push(...localpatches) // pretty much all the patches aside from the bsdiff itself
+                if (checkForOverlappingPatches(combinedpatches)) {
+                    return -1
+                }
+                let romhackmod = readips(loadedroms['romhackIps'].allbytes)
+                if (romhackmod.length == 0) {
+                    console.log('failed to process romhack ips')
+                    return -1
+                }
+                // patch order is:
+                //     1) start a fresh bsdiff patch based on vanilla
+                //    we specify the order of these three right here:
+                //    {
+                //     2) add romhack (now it's the romhack)
+                //     3) add AP basepatch tailored to the addresses available in this specific romhack
+                //     4) add localpatches
+                //    }
+                //     5) copy items from apsm
+                //     6) copy seed-specific data from apsm over top of some of the AP basepatch
                 let finished_apsm = archi.archipelagomagic(loadedroms['apsm'].allbytes,
-                                                           basepatch,
-                                                           loadedroms['rotation'].allbytes,
+                                                           [romhackmod, basepatch, localpatches], /* order of patching is important! */
+                                                           loadedroms['vanilla'].allbytes,
                                                            offsetsInRomOf100ItemPlms,
                                                            'rotation')
                 let arraybuffer = new ArrayBuffer(finished_apsm.buffer, finished_apsm.byteOffset, finished_apsm.byteLength)
@@ -1711,20 +1740,26 @@ document.addEventListener('DOMContentLoaded', function (event) {
     </ul>
     <p>by strotlog 2022</p>
     <div id='divIdRandoRomArea' style='border: 1px; border-style: dotted' ondrop="event.preventDefault(); addRomFiles('rando', event.dataTransfer.files)">
-        <h3>Rando ROM</h3>
-        <input type='file' id='inputIdRandoRom' style='display:none' onchange="addRomFiles('rando', this.files)"/>
+        <p><h3 style="display: inline">
+            Rando ROM
+        </h3><div style="color:#666666">&nbsp;or Archipelago .apsm (beta)</div></p>
+        <input type='file' id='inputIdRandoRom' style='display:none' onchange="addRomFiles('rando', this.files)" accept=".sfc,.smc,.apsm" />
         <input type='button' id='inputIdRandoRomButton' value='Browse' onclick="document.getElementById('inputIdRandoRom').click()"/>
         <span id='spanIdRandoRomFilename'>(No file)</span>
     </div>
     <div id='divIdVanillaRomArea' style='border: 1px; border-style: dotted' ondrop="event.preventDefault(); addRomFiles('vanilla', event.dataTransfer.files)">
-        <h3>Vanilla Super Metroid ROM (unheadered)</h3>
-        <input type='file' id='inputIdVanillaRom' style='display:none' onchange="addRomFiles('vanilla', this.files)"/>
+        <h3>
+            Vanilla Super Metroid ROM (unheadered)
+        </h3>
+        <input type='file' id='inputIdVanillaRom' style='display:none' onchange="addRomFiles('vanilla', this.files)" accept=".sfc,.smc" />
         <input type='button' id='inputIdVanillaRomButton' value='Browse' onclick="document.getElementById('inputIdVanillaRom').click()"/>
         <span id='spanIdVanillaRomFilename'>(No file)</span>
     </div>
     <div id='romhackIpsArea' style='border: 1px; border-style: dotted' ondrop="event.preventDefault(); addRomFiles('romhackIps', event.dataTransfer.files)">
-        <h3>Rotation Hack IPS</h3>
-        <input type='file' id='inputIdRomhackIps' style='display:none' onchange="addRomFiles('romhackIps', this.files)"/>
+        <p><h3 style="display:inline">
+            Rotation Hack IPS
+        </h3><div style="color:#333333">&nbsp;by SMILEuser96</div></p>
+        <input type='file' id='inputIdRomhackIps' style='display:none' onchange="addRomFiles('romhackIps', this.files)" accept=".ips" />
         <input type='button' id='inputIdRomhackIpsButton' value='Browse' onclick="document.getElementById('inputIdRomhackIps').click()"/>
         <span id='spanIdRomhackIpsFilename'>(No file)</span>
     </div>
