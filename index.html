@@ -362,19 +362,42 @@ function patchmain({hasRoms = true} = {}) {
     patches.push({address: 0x134c5, type: 'overwrite',
                   bytes: [0x00, 0x0c].reverse()})
 
-    // code patch (7): fix rotation escape climb's PLM coordinates issues by strotlog
+    // code patch (7): fix well known vanilla bluespeed in heatedroom bug (patrickjohnston.org):
+    //  "$90:852C . . . BUG: This overwrites A with the number of sounds queued if the queue is not full
+    //  "Causing the index for the $91:B61F table to be 5 sometimes, which [is] greater than the table size,
+    //  "which causes the blue suit [to] fail when boosting sometimes (mostly in heated rooms)"
+    // we expand the table to overlap with beginning of enormous $91:B629 Pose definitions table by setting a
+    // harmless/unused 'Pose X direction' bit in entry 0 to $02 thus making $91:B61F[4] == $91:B61F[5]
+    // (index 4 = speed boosting, index 5 = bugged)
+    patches.push({address: 0x8b629, type: 'overwrite',
+                  bytes: [0x02]})
+
+    // code patch (8): fix obscure vanilla bug where turning off spring ball while bouncing can crash in $91:EA07:
+    // overwrite unreachable code at $91:fc4a (due to pose 0x65 not existing).
+    // translate RAM $0B20 values #$0601 and #$0602 (seem spring ball related)
+    // to valid array indices #$0001 and #$0002, respectively (values expected by $91:EA07)
+    patches.push({address: 0x8ea07, type: 'overwrite',
+                  bytes: ['jsl', [0x91, 0xfc, 0x4a].reverse()].flat()}) // jsl $91:fc4a
+    patches.push({address: 0x8fc4a, type: 'overwrite',
+                  bytes: [0xad /* lda */, [0x0B, 0x20].reverse(), // LDA $0B20: Used for bouncing as a ball when you land
+                          0x29 /* and imm */, [0x00, 0xff].reverse(), // low byte only
+                          0x0a /* asl A (ie, A*=2) */,
+                          'rtl'
+                          ].flat()})
+
+    // code patch (8): fix rotation escape climb's PLM coordinates issues by strotlog
     patches.push(...fixEscapeClimb)
 
-    // code patch (8): fix crash when shooting a dying gadora (eye door) in the ceiling
+    // code patch (9): fix crash when shooting a dying gadora (eye door) in the ceiling
     patches.push(...fixRidleyAndDraygonGadoras)
 
-    // code patch (9): max ammo display by strotlog
+    // code patch (10): max ammo display by strotlog
     patches.push(...maxAmmoDisplay)
 
-    // code patch (10): suit pickup softlock prevention by strotlog
+    // code patch (11): suit pickup softlock prevention by strotlog
     patches.push(...suitPickupsNowPreserveSamusLocation)
 
-    // code patch (11): faster sm rotation intro by strotlog
+    // code patch (12): faster sm rotation intro by strotlog
     patches.push(...fasterIntro)
 
     if (checkForOverlappingPatches(patches)) {
@@ -1733,7 +1756,7 @@ document.addEventListener('DOMContentLoaded', function (event) {
     <p>This is not exactly a randomizer. Instead, it copies the locations of all the items from a <strong><a href="https://varia.run/">VARIA Randomizer</a></strong> ROM seed that you provide. (VARIA itself may include a rotation randomizer soon.)</p>
     <p>This:</p>
     <ul>
-        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door; 4. BT wakes; 5. balanced suits; 6. screw attack menuing; 7. escape-climb softlock fix; 8. down-facing gadora crash fix; 9. max ammo equip screen; 10. suit pickup restores position; 11. faster intro" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
+        <li>Applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door; 4. BT wakes; 5. balanced suits; 6. screw attack menuing; 7. speed echoes in heated room; 8. spring change in bounce crash fix; 9. escape-climb softlock fix; 10. down-facing gadora crash fix; 11. max ammo equip screen; 12. suit pickup restores position; 13. faster intro" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">some minimal</dfn> code patches (the list may grow later). Beyond these changes, it is exactly like SM: Rotation except the items are moved. Be careful and save!</li>
         <li><strong>Does not ensure the seed is completable.</strong></li>
         <li>Will not show errors plainly yet - check your browser's console if a download link doesn't appear.</li>
         <li>Will not upload or store anything - it's all in your browser. (This means links generated are very temporary and local to this tab.)</li>
