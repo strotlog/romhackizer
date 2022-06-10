@@ -16,8 +16,9 @@ define(['require', 'compressjs/main.min', 'js-yaml/js-yaml.min'],
                                    modifications /* note, order is important in case of overlaps */,
                                    vanillaSm,
                                    offsetsInRomOf100ItemPlms,
-                                   hackname) {
-            ap = new archipelagoclass(apsm, modifications, vanillaSm, offsetsInRomOf100ItemPlms, hackname)
+                                   hackname,
+                                   itemMapping) {
+            ap = new archipelagoclass(apsm, modifications, vanillaSm, offsetsInRomOf100ItemPlms, hackname, itemMapping)
             this.ap = ap
             ap.extractApsmData()
             ap.expandRom()
@@ -34,13 +35,15 @@ class archipelagoclass {
                 modifications,
                 vanillaSm,
                 offsetsInRomOf100ItemPlms,
-                hackname) {
+                hackname,
+                itemMapping) {
 
         this.apsm = apsm
         this.modifications = modifications
         this.vanillaSm = vanillaSm
         this.offsetsInRomOf100ItemPlms = offsetsInRomOf100ItemPlms
         this.hackname = hackname
+        this.itemMapping = itemMapping
         this.name = 'archipelago'
         this.zip = new zipfile0(this.apsm, "delta.bsdiff4")
     }
@@ -56,26 +59,152 @@ class archipelagoclass {
     expandRom() {
         if (this.hackname == 'rotation') {
             this.bsdiff_apromhacked.expandtosize(romSize_Rotation, 0xff)
+        } else if (this.hackname == 'zfactor') {
+            this.bsdiff_apromhacked.expandtosize(romSize_Zfactor, 0xff)
         } else {
             console.log('unknown hackname "' + this.hackname + '" in expandRom')
         }
     }
 
     copy100PlmsAndNothings() {
+        let ap_inferredplms = {}
+        let romhack_ap_plms = {}
+        if (this.itemMapping != null) {
+            if (this.hackname == 'zfactor') {
+                romhack_ap_plms['visible'] = parseInt('0x' + visiblePlm_Zfactor['new'].split(':')[1])
+                romhack_ap_plms['chozo'] = romhack_ap_plms['visible'] + 4
+                romhack_ap_plms['hidden'] = romhack_ap_plms['visible'] + 8
+            } else {
+                console.log('warning: hack \'' + this.hackname + '\' does not have a visible-item-PLM symbol in js, assuming same PLM ID as regular AP\'s')
+            }
+            // to make useful future inferences about the hidden-ness level of romhack's original items,
+            // we must first infer the hidden-ness level associated with each archipelago item
+            let counts = {}
+            this.offsetsInRomOf100ItemPlms.map(
+                (address) => this.bsdiff_from_ap.read(this.vanillaSm, address, 2)).map(
+                (twobytes) => twobytes[0] + twobytes[1]*256).filter(
+                (ap_plm) => ap_plm != 0xbae9 && ap_plm != 0xbaed /* remove 'nothing' items */).forEach(
+                function (ap_plm) {
+                    if (!(ap_plm in counts)) {
+                        counts[ap_plm] = 0
+                    }
+                    counts[ap_plm]++
+                })
+            // note: keys are strings (base 10 representation)
+            let max_count = Math.max(...Object.keys(counts).map((ap_plm) => counts[ap_plm]))
+            let most_used_plm = parseInt(Object.keys(counts).filter((ap_plm) => counts[ap_plm] == max_count)[0]) // arbitrary tiebreak
+            // order is: visible, chozo, hidden
+            // e.g. $f870: visible plm definition (any item)
+            //      $f874: chozo plm definition (any item)
+            //      $f878: hidden plm definition (any item)
+            // but the absolute position isn't super fixed, hence all this we've done right here
+            let visibleplm = 0
+            if (most_used_plm - 4 in counts && most_used_plm - 8 in counts) {
+                visibleplm = most_used_plm - 8
+            } else if (most_used_plm - 4 in counts && most_used_plm + 4 in counts) {
+                visibleplm = most_used_plm - 4
+            } else if (most_used_plm + 4 in counts && most_used_plm + 8 in counts) {
+                visibleplm = most_used_plm
+            }
+            if (visibleplm != 0) {
+                ap_inferredplms['visible'] = visibleplm
+                ap_inferredplms['chozo'] = visibleplm + 4
+                ap_inferredplms['hidden'] = visibleplm + 8
+                // map the reverse too (key is in base 10 representation)
+                ap_inferredplms[visibleplm    ] = 'visible'
+                ap_inferredplms[visibleplm + 4] = 'chozo'
+                ap_inferredplms[visibleplm + 8] = 'hidden'
+                console.log('vanilla ap is using visible plm at $84:'+visibleplm.toString(16))
+                if (Object.keys(romhack_ap_plms).length == 0) {
+                    // assume same PLM IDs (warning emitted above)
+                    romhack_ap_plms['visible'] = ap_inferred_plms['visible']
+                    romhack_ap_plms['chozo'  ] = ap_inferred_plms['chozo'  ]
+                    romhack_ap_plms['hidden' ] = ap_inferred_plms['hidden' ]
+                }
+            } else {
+                console.log('warning: did not find 2 adjacent PLMs to ap\'s most_used_plm of 0x' + most_used_plm.toString(16) + ' (count = ' + max_count + '). counts = ' + JSON.stringify(counts))
+            }
+        }
         for (const address of this.offsetsInRomOf100ItemPlms) {
+            let newaddress
+            if (this.itemMapping == null) {
+                newaddress = address // all item locations are the same
+            } else {
+                // convert vanilla item locations to romhack item locations
+                newaddress = parseInt(this.itemMapping.fromAp['0x' + address.toString(16)])
+            }
+
             let plm = this.bsdiff_from_ap.read(this.vanillaSm /* basis of the bsdiff */, address, 2)
-            this.bsdiff_apromhacked.overwrite(address, plm)
             let itemcopied = plm[0] + plm[1]*256
             // see patchmain in other file for comments detailing PLM codes
             if (itemcopied == 0xbae9) {
-                this.bsdiff_apromhacked.overwrite(address, [0x2f, 0xb6]) // 'nothing' chozo or 'nothing' in the open
-            }
-            if (itemcopied == 0xbaed) {
-                this.bsdiff_apromhacked.overwrite(address, [0x83, 0xef]) // 'nothing' shot block
-                this.bsdiff_apromhacked.overwrite(address+4, [0x20, 0x05]) // hackery to avoid new PLM (see patchmain comments)
-            }
-            if (itemcopied == 0) {
+                this.bsdiff_apromhacked.overwrite(newaddress, [0x2f, 0xb6]) // 'nothing' chozo or 'nothing' in the open
+            } else if (itemcopied == 0xbaed) {
+                this.bsdiff_apromhacked.overwrite(newaddress, [0x83, 0xef]) // 'nothing' shot block
+                this.bsdiff_apromhacked.overwrite(newaddress+4, [0x20, 0x05]) // hackery to avoid new PLM (see patchmain comments)
+            } else if (itemcopied == 0) {
                 console.log('Error: we read PLM value of 0 (should be a ROM pointer) @ rom offset 0x' + address.toString(16))
+            } else if (this.itemMapping == null) {
+                // main overwrite!
+                this.bsdiff_apromhacked.overwrite(newaddress, plm)
+            } else if(itemcopied in ap_inferredplms) {
+                // we know exactly what type of PLM this is, and can discard the PLM ID
+                // infer the hidden-ness level of the romhack's original item (must do this before overwriting the PLM)
+                let romhackOrigPlmBytes = this.bsdiff_apromhacked.read(this.vanillaSm, newaddress, 2)
+                let romhackOrigPlm = romhackOrigPlmBytes[0] + romhackOrigPlmBytes[1]*256
+                let hiddenstate
+                // if romhack uses original item PLMs, they will fall in these ranges:
+                if        (0xeed7 <= romhackOrigPlm &&
+                                     romhackOrigPlm <= 0xef27) {
+                    hiddenstate = 'visible'
+                } else if (0xef2b <= romhackOrigPlm &&
+                                     romhackOrigPlm <= 0xef7b) {
+                    hiddenstate = 'chozo'
+                } else if (0xef7f <= romhackOrigPlm &&
+                                     romhackOrigPlm <= 0xefcf) {
+                    hiddenstate = 'hidden'
+                } else {
+                    hiddenstate = 'unknown'
+                }
+                if (hiddenstate != 'unknown') {
+                    this.bsdiff_apromhacked.overwrite(newaddress, [(romhack_ap_plms[hiddenstate]     ) & 0xff,
+                                                                   (romhack_ap_plms[hiddenstate] >> 8) & 0xff],
+                                                      2)
+                }
+                // also, since this is a non-nothing item that all the AP MW item PLM code must look
+                // up in the item location table, we must copy the correct location identifier into
+                // the PLM's "room argument". this is what actually propagates up the vanilla item
+                // type (such as reserve tank), along with the item location save bit location, to
+                // this specific item in the romhack
+                // (this operation is not needed for very vanilla-like romhacks as they rarely
+                //  modify location ids, along with their not modifying room PLM rom offsets)
+                let locationidBytes = this.bsdiff_from_ap.read(this.vanillaSm, address + 4, 2)
+                this.bsdiff_apromhacked.overwrite(newaddress + 4, locationidBytes)
+            } else {
+                console.log('warning: failed to infer hidden-ness of romhack orig PLM 0x' + romhackOrigPlm.toString(16) + ' @ ROM file address 0x' + newaddress.toString(16) + '. copying PLM 0x' + itemcopied.toString(16) + ' directly from AP')
+                if (ap_inferredplms['visible'] != romhack_ap_plms['visible']) {
+                    console.log('  -- additional warning: romhack ap plms differ from original ap plms, this rom is *very likely* to crash!')
+                }
+                this.bsdiff_apromhacked.overwrite(newaddress, plm)
+            }
+        }
+        // if the romhack has 110 items, we need to change 10 of them very subtly (or N-100).
+        // all 110 items have a unique number pointing to the SRAM bit that is theirs and theirs alone.
+        // this number is called 'location id'.
+        // AP does not modify this number (although it indexes a lot of basic things off it, unlike vanilla)
+        // luckily SM has hundreds of unused bits in the bit array;
+        // we just need to select location ids we think are unused for each of the N-100 extra items!
+        if (this.itemMapping != null) {
+            if (this.itemMapping.leaveAsRegularItem.length > (127-90+1)) {
+                console.log('error: romhack has too many extra location IDs for current implementation ('
+                            + this.itemmapping.leaveAsRegularItem.length + '). add a new range to this code!')
+            }
+            for (let i = 0; i < this.itemMapping.leaveAsRegularItem.length; i++) {
+                let address = parseInt(this.itemMapping.leaveAsRegularItem[i])
+                // sm does not use 0n90-0n127, inclusive
+                let locationId = 90+i
+                // location id is technically 2 bytes at offset plm+4 and plm+5, but as long as id's are under 256 we can leave plm+5 as 0
+                this.bsdiff_apromhacked.overwrite(address + 4, [locationId])
             }
         }
     }
@@ -89,7 +218,9 @@ class archipelagoclass {
     copyLimitedApsmData() {
         let table = null
         if (this.hackname == 'rotation') {
-            table = copyFromMultiworldTo_Rotation
+            table = copyFromMultiWorldTo_Rotation
+        } else if (this.hackname == 'zfactor') {
+            table = copyFromMultiWorldTo_Zfactor
         } else {
             console.log('unknown hackname "' + this.hackname + '" in copyLimitedApsmData')
         }
@@ -118,9 +249,47 @@ class archipelagoclass {
                     arr[i] = entry.vanilla
                 }
             }
-            // note, once data at an address is written, the original cannot be read again.
             let data = this.bsdiff_from_ap.read(this.vanillaSm, romOffsetFromSnesAddrString(entry.old), entry.length)
             this.bsdiff_apromhacked.overwrite(romOffsetFromSnesAddrString(entry.new), data)
+        }
+        // HACK: for sm_item_graphics__new table, the data may not be in the .apsm yet. add it (no harm if this overwrite is never read):
+        let smgraphicstarget = table.find((e) => e.symbol == "sm_item_graphics__new").new
+        if (this.bsdiff_apromhacked.read(this.vanillaSm, romOffsetFromSnesAddrString(smgraphicstarget), 1)[0] == 0xff /* 0xff suggests freespace */) {
+            console.log("workaround versioning issues: adding sm_item_graphics__new manually")
+            let graphics = [0x08, 0x00,
+                            0x0A, 0x00,
+                            0x0C, 0x00,
+                            0x0E, 0x00,
+                            0x2F, 0xE1,
+                            0x5D, 0xE1,
+                            0x8B, 0xE1,
+                            0xB9, 0xE1,
+                            0xE7, 0xE1,
+                            0x15, 0xE2,
+                            0x43, 0xE2,
+                            0x71, 0xE2,
+                            0xA3, 0xE2,
+                            0xD8, 0xE2,
+                            0x0D, 0xE3,
+                            0x3A, 0xE3,
+                            0x68, 0xE3,
+                            0x95, 0xE3,
+                            0xC3, 0xE3,
+                            0xF1, 0xE3,
+                            0x1F, 0xE4,
+                            0x64, 0xFF,
+                            0x6E, 0xFF,
+                            ]
+            if (this.hackname == 'rotation') {
+                // plm_graphics_entry_offworld_item, and _progression_item
+                graphics[graphics.length-4] = 0x14
+                graphics[graphics.length-3] = 0xfc
+                graphics[graphics.length-2] = 0x1e
+                graphics[graphics.length-1] = 0xfc
+                // or maybe it should be the other way around - rotation default, zfactor special, since zfactor is the one that moves plms around
+            }
+            this.bsdiff_apromhacked.overwrite(romOffsetFromSnesAddrString(smgraphicstarget),
+                                              graphics)
         }
     }
 
@@ -135,10 +304,11 @@ class archipelagoclass {
 romSize_Rotation = 3*1024*1024 /* 3MiB vanilla */ + 4*0x8000 // go 4 banks beyond vanilla end: 2 new banks ($E0, $E1) for vanilla-rotation, +2 new banks ($E2, $E3) for multiworld
 
 // from https://github.com/strotlog/SMBasepatch/.../rotation/multiworld.sym
-copyFromMultiworldTo_Rotation = [
+copyFromMultiWorldTo_Rotation = [
     {"symbol" : "message_item_names", "new": "85:9963", "old": "85:9963", "length": 7744, vanilla : 0xFF },
     {"symbol" : "rando_item_table", "new": "E2:E000", "old": "B8:E000", "length": 4096, vanilla: 0xFF },
-    {"symbol" : "sm_item_graphics", "new": "84:F882", "old": "84:F882", "length": 230, vanilla: 0xFF },
+    //{"symbol" : "sm_item_graphics", "new": "84:F882", "old": "84:F882", "length": 230, vanilla: 0xFF },
+    {"symbol" : "sm_item_graphics__new", "new": "E2:8800", "old": "B8:8800", "length": 46, vanilla: 0xFF },
     {"symbol" : "offworld_graphics", "new": "89:9100", "old": "89:9100", "length": 512, vanilla: 0x00 },
     {"symbol" : "config_deathlink", "new": "CE:FF04", "old": "CE:FF04", "length": 1, vanilla: 0xFF },
     {"symbol" : "config_remote_items", "new": "CE:FF06", "old": "CE:FF06", "length": 1, vanilla: 0xFF },
@@ -146,6 +316,23 @@ copyFromMultiworldTo_Rotation = [
     {"symbol" : "rando_player_id_table", "new": "E2:D800", "old": "B8:D800", "length": 400, vanilla: 0xFF },
     {"symbol" : "snes_header_game_title", "new": "80:FFC0", "old": "80:FFC0", "length": 21, vanilla: 'Super Metroid'.padEnd(21, ' ')}
 ]
+
+romSize_Zfactor = 3*1024*1024 /* 3MiB vanilla */ + 7*0x8000
+
+copyFromMultiWorldTo_Zfactor = [
+    {"symbol" : "message_item_names", "new": "85:9963", "old": "85:9963", "length": 7744, vanilla : 0xFF },
+    {"symbol" : "rando_item_table", "new": "E5:E000", "old": "B8:E000", "length": 4096, vanilla: 0xFF },
+    {"symbol" : "sm_item_graphics__new", "new": "E5:8800", "old": "B8:8800", "length": 46, vanilla: 0xFF },
+    {"symbol" : "offworld_graphics", "new": "89:9100", "old": "89:9100", "length": 512, vanilla: 0x00 },
+    {"symbol" : "config_deathlink", "new": "CE:FF04", "old": "CE:FF04", "length": 1, vanilla: 0xFF },
+    {"symbol" : "config_remote_items", "new": "CE:FF06", "old": "CE:FF06", "length": 1, vanilla: 0xFF },
+    {"symbol" : "rando_player_table", "new": "E5:D000", "old": "B8:D000", "length": 2048, vanilla: 0xFF },
+    {"symbol" : "rando_player_id_table", "new": "E5:D800", "old": "B8:D800", "length": 400, vanilla: 0xFF },
+    {"symbol" : "snes_header_game_title", "new": "80:FFC0", "old": "80:FFC0", "length": 21, vanilla: 'Super Metroid'.padEnd(21, ' ')}
+]
+
+visiblePlm_Zfactor =
+    { "symbol" : "archipelago_visible_item_plm", "new": "84:FBC0" }
 
 // end data region
 
@@ -501,14 +688,14 @@ class bsdiff {
             this.chunks[i].length = outputaddress - this.chunks[i].outputaddress
             if (this.chunks[i].source == 'mix') {
                 this.chunks.splice(i+2, 0, {source: 'mix',
-                                            outputaddress: outputaddress + data.length, 
+                                            outputaddress: outputaddress + data.length,
                                             length: splitfinalchunklength,
                                             readptr: this.chunks[i].readptr + this.chunks[i].length + data.length,
                                             diffptr: this.chunks[i].diffptr + this.chunks[i].length + data.length,
                                             createdby: 'postmidchunk'})
             } else { // 'extra'
                 this.chunks.splice(i+2, 0, {source: 'extra',
-                                            outputaddress: outputaddress + data.length, 
+                                            outputaddress: outputaddress + data.length,
                                             length: splitfinalchunklength,
                                             extraptr: this.chunks[i].extraptr + this.chunks[i].length + data.length,
                                             createdby: 'postmidchunk'})

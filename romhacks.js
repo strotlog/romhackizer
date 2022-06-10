@@ -577,6 +577,173 @@ var romhacks = {
             patches.push(...romhacks.rotation.plmLocationPatchGenerator())
             return patches
         },
-    }
+    },
     // end rotation
+
+    zfactor: {
+        sm_to_zf_mapping: {
+        // from a WIP spreadsheet based on where's locked by what in varia vanilla 'newbie' logic
+        // sm    :  zfactor item
+        // (string is the way of making hex json compatible, lowercasing matches js toString(16) (important))
+        '0x781cc': '0x7d6ef',
+        '0x781e8': '0x7d975',
+        '0x781ee': '0x7c911',
+        '0x781f4': '0x7cc8d',
+        '0x78248': '0x7cf47',
+        '0x78264': '0x7c9f1',
+        '0x783ee': '0x7c98f',
+        '0x78404': '0x7c895',
+        '0x78432': '0x7c949',
+        '0x78464': '0x7cda3',
+        '0x7846a': '0x7cda9',
+        '0x78478': '0x7cd3d',
+        '0x78486': '0x7cea7',
+        '0x784ac': '0x7ce6f',
+        '0x784e4': '0x7ce07',
+        '0x78518': '0x7cbdd',
+        '0x7851e': '0x7cbd7',
+        '0x7852c': '0x7cd37',
+        '0x78532': '0x7c995',
+        '0x78538': '0x7cddf',
+        '0x78608': '0x7c8e5',
+        '0x7860e': '0x7cc55',
+        '0x78614': '0x7ce23',
+        '0x7865c': '0x7cd9b',
+        '0x78676': '0x7cd6b',
+        '0x786de': '0x7cbf1',
+        '0x7874c': '0x7ceaf',
+        '0x78798': '0x7cbeb',
+        '0x7879e': '0x7ca1b',
+        '0x787c2': '0x7cd95',
+        '0x787d0': '0x7cc47',
+        '0x787fa': '0x7c9e9',
+        '0x78802': '0x7cc11',
+        '0x78824': '0x7cdd1',
+        '0x78836': '0x7d859',
+        '0x7883c': '0x7d879',
+        '0x78876': '0x7cc4f',
+        '0x788ca': '0x7d27d',
+        '0x7890e': '0x7d2e3',
+        '0x78914': '0x7c943',
+        '0x7896e': '0x7cf33',
+        '0x7899c': '0x7cf2b',
+        '0x789ec': '0x7d251',
+        '0x78aca': '0x7d305',
+        '0x78ae4': '0x7d2ff',
+        '0x78b24': '0x7d461',
+        '0x78b46': '0x7cd57',
+        '0x78ba4': '0x7d375',
+        '0x78bac': '0x7ced5',
+        '0x78bc0': '0x7cfab',
+        '0x78be6': '0x7cbb5',
+        '0x78bec': '0x7ce0d',
+        '0x78c04': '0x7d389',
+        '0x78c14': '0x7d403',
+        '0x78c2a': '0x7d68d',
+        '0x78c36': '0x7d7e1',
+        '0x78c3e': '0x7d333',
+        '0x78c44': '0x7d361',
+        '0x78c52': '0x7d573',
+        '0x78c66': '0x7d2ab',
+        '0x78c74': '0x7d40b',
+        '0x78c82': '0x7d421',
+        '0x78cbc': '0x7d443',
+        '0x78cca': '0x7d4b5',
+        '0x78e6e': '0x7d07f',
+        '0x78e74': '0x7d2eb',
+        '0x78f30': '0x7d39d',
+        '0x78fca': '0x7d73b',
+        '0x78fd2': '0x7d3d7',
+        '0x790c0': '0x7cfd1',
+        '0x79100': '0x7d4ed',
+        '0x79108': '0x7d20b',
+        '0x79110': '0x7cffd',
+        '0x79184': '0x7d77b',
+        '0x7c265': '0x7d8f9',
+        '0x7c2e9': '0x7ccff',
+        '0x7c2ef': '0x7d52d',
+        '0x7c319': '0x7d71b',
+        '0x7c337': '0x7d9f1',
+        '0x7c357': '0x7c9ab',
+        '0x7c365': '0x7cb2b',
+        '0x7c36d': '0x7d5ed',
+        '0x7c437': '0x7d967',
+        '0x7c43d': '0x7dc19',
+        '0x7c47d': '0x7dbd9',
+        '0x7c483': '0x7d9a7',
+        '0x7c4af': '0x7d989',
+        '0x7c4b5': '0x7dac5',
+        '0x7c533': '0x7da55',
+        '0x7c559': '0x7d93b',
+        '0x7c5dd': '0x7da81',
+        '0x7c5e3': '0x7dbe7',
+        '0x7c5eb': '0x7da15',
+        '0x7c5f1': '0x7d9cb',
+        '0x7c603': '0x7dc2d',
+        '0x7c609': '0x7dbd1',
+        '0x7c6e5': '0x7ce15',
+        '0x7c74d': '0x7db7d',
+        '0x7c755': '0x7d923',
+        '0x7c7a7': '0x7dabd',
+        },
+        zf_unmodified_except_sram_bit: [ // cover 113 locations (100+these 13 which will appear as vanilla romhack.. except we modify the last 3's identity. first 10 of these are 7 missiles, 2 super packs, and 1 e tank)
+            '0x7C9BF', '0x7CC2D', '0x7CC95', '0x7D2C1', '0x7D13B', '0x7D133', '0x7D087', '0x7DA1B', '0x7DAD9', '0x7DB51', '0x7d7e9', '0x7d7ef', '0x7d7f5',
+        ],
+        patchmain: function ({hasRoms = true, loadedroms = {}} = {}) {
+
+            let itempatches = []
+
+            if (hasRoms) {
+                let springballcount = 0
+                for (fromAddressString in romhacks.zfactor.sm_to_zf_mapping) {
+                    let fromAddress = parseInt(fromAddressString)
+                    let itemid = loadedroms['rando'].allbytes[fromAddress] + loadedroms['rando'].allbytes[fromAddress+1]*256 // convert plm from little endian
+
+                    // check for both types of 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
+                    if (itemid === 0xbae9) {
+                        // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same)
+                        // because the varia 'nothing item plm' types do not exist in sm rotation, we have to instead use plm id 0xb62f "Don't make PLM". it's perfectly equivalent anyway!
+                        newitem = 0xb62f
+                    } else if (itemid === 0xbaed) {
+                        // hidden 'nothing', see comments on 0xbaed from rotation, this is a bit hacky
+                        newitem = 0xef83
+                        itempatches.push({address: parseInt(romhacks.zfactor.sm_to_zf_mapping[fromAddressString])+4, type: 'overwrite',
+                                          bytes: [0x05, 0x20].reverse()})
+                    } else {
+                        newitem = itemid
+                    }
+                    itempatches.push({address: parseInt(romhacks.zfactor.sm_to_zf_mapping[fromAddressString]), type: 'overwrite',
+                                      bytes: [(itemid & 0xff), (itemid >> 8) & 0xff]})
+                    // check for race mode
+                    if (itemid === 0xef03 || itemid === 0xef57 || itemid === 0xefab) {
+                        springballcount++
+                    }
+                    if (springballcount > 5) {
+                        console.log('Error: Cannot read items from a Race-Mode protected rando ROM!!')
+                        return []
+                    }
+                }
+            }
+
+            let patches = []
+
+            if (itempatches.length != 0) {
+                itempatches[0].description = 'copying items from rando rom'
+                patches.push(...itempatches)
+            }
+
+            patches.push(...generalpatches.all()) // requires that html has loaded generalpatches.js
+
+            patches.push(...romfeatures.maxAmmoDisplay) // requires that html has loaded romfeatures.js
+            patches.push(...romfeatures.suitPickupsNowPreserveSamusLocation)
+
+            // z-factor specific:
+            // change identity of the 3 fixed 'super secret items' for backdooring WS before phantoon (very z-factor specific, avoiding OP skip)
+            patches.push({address: 0x7d7e9, type: 'overwrite', bytes: [0xee, 0xdb].reverse(), description: 'nerf super secret room'}) // missile
+            patches.push({address: 0x7d7ef, type: 'overwrite', bytes: [0xee, 0xdf].reverse()}) // super pack
+            patches.push({address: 0x7d7f5, type: 'overwrite', bytes: [0xee, 0xe3].reverse()}) // pb pack
+
+            return patches
+        },
+    },
 }
