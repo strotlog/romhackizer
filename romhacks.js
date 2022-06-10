@@ -1,0 +1,582 @@
+var romhacks = {
+
+    offsetsInRomOf100ItemPlms:  [
+0x78264,
+0x78404,
+0x78432,
+0x7852c,
+0x78614,
+0x786de,
+0x7879e,
+0x787c2,
+0x787fa,
+0x78824,
+0x78876,
+0x7896e,
+0x7899c,
+0x78aca,
+0x78b24,
+0x78ba4,
+0x78bac,
+0x78c36,
+0x78c3e,
+0x78c82,
+0x78cca,
+0x79108,
+0x79110,
+0x79184,
+0x7c2e9,
+0x7c337,
+0x7c365,
+0x7c36d,
+0x7c47d,
+0x7c559,
+0x7c5e3,
+0x7c6e5,
+0x7c755,
+0x7c7a7,
+0x781cc,
+0x781e8,
+0x781ee,
+0x781f4,
+0x78248,
+0x783ee,
+0x78464,
+0x7846a,
+0x78478,
+0x78486,
+0x784ac,
+0x784e4,
+0x78518,
+0x7851e,
+0x78532,
+0x78538,
+0x78608,
+0x7860e,
+0x7865c,
+0x78676,
+0x7874c,
+0x78798,
+0x787d0,
+0x78802,
+0x78836,
+0x7883c,
+0x788ca,
+0x7890e,
+0x78914,
+0x789ec,
+0x78ae4,
+0x78b46,
+0x78bc0,
+0x78be6,
+0x78bec,
+0x78c04,
+0x78c14,
+0x78c2a,
+0x78c44,
+0x78c52,
+0x78c66,
+0x78c74,
+0x78cbc,
+0x78e6e,
+0x78e74,
+0x78f30,
+0x78fca,
+0x78fd2,
+0x790c0,
+0x79100,
+0x7c265,
+0x7c2ef,
+0x7c319,
+0x7c357,
+0x7c437,
+0x7c43d,
+0x7c483,
+0x7c4af,
+0x7c4b5,
+0x7c533,
+0x7c5dd,
+0x7c5eb,
+0x7c5f1,
+0x7c603,
+0x7c609,
+0x7c74d
+    ],
+
+    rotation: {
+        patchmain: function ({hasRoms = true, loadedroms = {}} = {}) {
+
+            let itempatches = []
+
+            if (hasRoms) {
+                let springballcount = 0
+                // this is kind of the main point of the whole patcher. take items from one rom & put into another.
+                // copy all 100 item PLMs' PLM entry pointers from rando to rotation (pointer size == 2 bytes; bank $84 implied)
+                // modify the in-memory copy of rotation rom in-place to save a little space
+                for (address of romhacks.offsetsInRomOf100ItemPlms) { // foreach (address in list of adddresses)
+                    // get the item!
+                    let itemid = loadedroms['rando'].allbytes[address] + loadedroms['rando'].allbytes[address+1]*256 // convert plm from little endian
+                    let newitem
+
+                    // check for both types of 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
+                    if (itemid === 0xbae9) {
+                        // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same)
+                        // because the varia 'nothing item plm' types do not exist in sm rotation, we have to instead use plm id 0xb62f "Don't make PLM". it's perfectly equivalent anyway!
+                        newitem = 0xb62f
+                    } else if (itemid === 0xbaed) {
+                        // 'nothing' shot block item.
+                        // set plm id to 0xef83 "Missile tank, shot block" but we'll have it depend on a very special parameter so that it's never there
+                        newitem = 0xef83
+                        // set PLM's parameter = 0x0520 (aka its unique location ID)
+                        // normally this parameter is less than about 0n160 = 0xa0. it indexes the 100 item locations of the game.
+                        // the key is that we use a PLM parameter such that [0xD870+(PLM parameter >> 3)] & 1 is always set to 1 in RAM.
+                        // with parameter = 0x0520, the PLM ends up reading the lowest bit of byte "$7E:D914: Loading game state" as if it were an item-found bit. this byte can be various values when loading a ceres room or landing site, maybe when escaping zebes too?
+                        // when loading a room that actually has an item, this byte is always set to 5: Main.
+                        // the lowest bit being 1 in that byte tells the PLM "this item was already picked up. don't be an item, just be a shot block that re-forms into pretty terrain"
+                        // (varia modified start locations also set the byte's value to 5 at some point when you load in, though untested whether this happens in time before a PLM in the same room might read a 0 and thus accidentally spawn.)
+                        // (also, you'd think the worst that could happen if we assumed wrong that the bit will always be 1, is that someone gets some missiles they weren't supposed to, but picking them up would actually set the lowest bit of $7E:D914, which could have unpredictable results.)
+                        itempatches.push({address: address+4, type: 'overwrite',
+                                          bytes: [0x05, 0x20].reverse()})
+                    } else {
+                        newitem = itemid
+                    }
+                    itempatches.push({address: address, type: 'overwrite',
+                                      bytes: [(itemid & 0xff), (itemid >> 8) & 0xff]})
+                    // check for race mode
+                    if (itemid === 0xef03 || itemid === 0xef57 || itemid === 0xefab) {
+                        springballcount++
+                    }
+                    if (springballcount > 5) {
+                        console.log('Error: Cannot read items from a Race-Mode protected rando ROM!!')
+                        return []
+                    }
+                }
+            }
+
+            let patches = []
+
+            if (itempatches.length != 0) {
+                itempatches[0].description = 'copying items from rando rom'
+                patches.push(...itempatches)
+            }
+
+            // items are done. now do a select few code patches that make things suck less!
+            patches.push(...generalpatches.all()) // requires that html has loaded generalpatches.js
+
+            patches.push(...romfeatures.maxAmmoDisplay) // requires that html has loaded romfeatures.js
+            patches.push(...romfeatures.suitPickupsNowPreserveSamusLocation)
+
+            // rotation-specific code patches
+            patches.push(...romhacks.rotation.allpatches())
+
+            return patches
+        },
+
+        zebesAwakeningPatch: [
+            // part 1: when samus enters construction zone from morph ball room, call (part 2)
+            // address = 0x18eb4 = ($83:8EAA + 0x10) i.e., door $83:8EAA's door asm
+            {address: 0x18eb4, type: 'overwrite', description: 'rotation zebes awkening patch',
+             bytes: [0xff, 0x00].reverse()},
+            // part 2: ... set zebes awake event bit. (does not affect the currently loaded/loading room, but effective thereafter)
+            // part 2b: ... and also set the door from construction zone (vanilla-right side of CZ; rotation-bottom side of CZ) from red to blue
+            // new code at $8f:ff00:
+            {address: 0x7ff00, type: 'freespace',
+             bytes: [0xaf /* load  */, [0x7e, 0xd8, 0x20].reverse(),
+                     0x9 /* or imm */, [0x0, 0x1].reverse(), // set zebes awake event bit
+                     0x8f /* store */, [0x7e, 0xd8, 0x20].reverse(),
+                     0xaf /* load  */, [0x7e, 0xd8, 0xb6].reverse(),
+                     0x9, /* or imm */, [0x0, 0x4].reverse(), // set bit 4 (3rd bit) of 6th byte of the big door bitmask, ie this is the 51st (counting from 0: number 50 or 0x32) bit of doors. makes it blue
+                     0x8f /* store */, [0x7e, 0xd8, 0xb6].reverse(),
+                     'rts', // return
+                     ].flat()},
+            // part 3: when checking the state of pit room or top of morph elevator room, read the zebes awake flag directly. forget about checking morph and missiles
+            //           (part 3 implementation choice: normally we'd just change the function pointer for the state-checking function, to point to the function that checks for a given event. done and done. but wait, that function requires 1 byte of space for a parameter (the "given event"), right after the function pointer, and meanwhile the vanilla morph+missile checking function requires no parameter. so inserting that 1 byte for a parameter would require repointing a ton of stuff! so we overwrite the morph+missile state-checking function's contents instead.)
+            // modify "$8F:E652: Room state check: morphball and missiles" from vanilla
+            {address: 0x7e652, type: 'overwrite',
+             bytes: [0xaf /* load  */, [0x7e, 0xd8, 0x20].reverse(),
+                     0x89 /* bit test A with constant */, [0x00, 0x01].reverse(),
+                     'bne', 3, // branch-(if)-not-equal-(to-zero): branch if a matching 1 bit was found
+                     // fall back to default state - room is dead
+                     'inx', // X++
+                     'inx', // X++ - fully passed over the pointer to 2nd (room alive) room state header, register X now pointing to next function pointer (E5E6: default state handler)
+                     'rts', // return
+                     // specify state header "room is alive"!
+                     0xbd /* load A=*(X+0) */, 0x00, 0x00,
+                     'tax', /* X=A */
+                     0x4c /* jmp */, [0xe5, 0xe6].reverse(),
+                     ].flat()},
+            ],
+
+        // force the BT fight as soon as samus enters the room. (sm rotation always locks you in the room; beating bt unlocks the door.)
+        // modify "$84:D33B: wake PLM if Samus has bombs" from vanilla, which wakes bomb torizo (BT)
+        // random note, this patch is sufficient for rotation but wouldn't be for vanilla. rotation replaced the very custom door in the room with a generic gray door, which always closes.
+        bombTorizoPatch: [
+            {address: 0x2533b, type: 'freespace', description: 'rotation bomb torizo patch',
+             bytes: ['nop', 'nop', 'nop', // remove the "If Samus doesn't have bombs" branch
+                     'nop', 'nop', 'nop', //   for the crumbling chozo,
+                     'nop', 'nop',        //   using NOP x8
+                     ].flat()},
+            ],
+
+        // SM rotation bug (as of latest=sm rotation beta 11): rando softlock possible because bomb wall does not auto-break in climb room (room $796BA) during escape.
+        // let's modify what SM rotation didn't modify:
+        //   the setup ASM for this roomstate
+        //     - lives at $8f:91a9
+        //     - contains tile x and y coordinates for where, upon entering room, to spawn a PLM with particular coordinates
+        //       (who knows why deerforce made the PLM spawn using ASM. cause i assume it's equivalent to putting the PLM in the usual spot, the room state header's PLM set)
+        //   the "pre-instruction" ASM for the code-spawned PLM
+        //     - lives at $84:b927
+        //     - does damage at the PLM's location only when samus is below and to the right of a pixel position that's hard-coded into the function
+        //   the initialization AI ASM of the fake enemy projectile that gets spawned by the above PLM
+        //     - lives in $86:b49d
+        //     - hard-codes a position of a fake enemy projectile that visually pretends to cause the explosion (it's not necessary to fix this for functioning)
+        fixEscapeClimb: [
+            // setup ASM hard-coded values modification:
+            {address: 0x791ad, type: 'overwrite', description: 'fix rotation zebes escape climb room',
+             bytes: [0x07, 0x10]}, // new (x, y) tile coordinate location of PLM. keep it in the bomb wall just like vanilla sm. moved 1px to the (new left) cause the whole thing doesn't blow up anymore due to who knows what
+            // pre-instruction ASM hard-coded values modification:
+            {address: 0x23928, type: 'overwrite',
+             bytes: [0x00, 0x00].reverse()}, // new X-pixel location of the trigger (X target=0 will always be satisfied)
+            {address: 0x2392d, type: 'overwrite',
+             bytes: [0x00, 0xe0].reverse()}, // new Y-pixel location of the trigger: 0x00d0. trigger on samus's center breaking a plane 2 tile heights above the top of the wall
+            // projectile initialization AI ASM hard-coded values modification:
+            {address: 0x3349e, type: 'overwrite',
+             bytes: [0x00, 0x80].reverse()}, // new X-pixel location of the visual explosion graphic: 0x0080
+            {address: 0x334a7, type: 'overwrite',
+             bytes: [0x01, 0x00].reverse()}, // new Y-pixel location of the visual explosion graphic: 0x0100. pixel (0x0080, 0x0100) is tile (x=0x08, y=0x10) which puts the graphic right in the middle of the top row of the barrier in rotation, at least after screen shake
+        ],
+
+        // SM rotation bug (as of latest=sm rotation beta 11): game can crash on down-facing gadoras (top of pre-ridley and pre-draygon rooms)
+        fixRidleyAndDraygonGadoras: [
+            // down-facing and up-facing gadoras seem to be implemented somewhat differently, with a bigger change for down-facing gadoras vs. vanilla
+            // the down-facing ones don't correctly modify BTS and PLM, resulting in spawning a random plm if samus shoots anything but the leftmost block while the gadora is in a dying state.
+            // pre-ridley dying gadora will spawn a plm that immediately jsr's to $84:ffff (last byte of bank $84 empty space) which crashes the game
+            // (pre-draygon seems to spawn part of a varia suit plm O_o the difference is just what happens to be in $(12),y. and then doesn't crash. grapple block BTS code for BTS >= 0x80 interprets BTS 0xff as needing its own instructions when it's not set up to correctly point to an adjacent block/tile)
+            // rotation's down-facing eye plm introduces a new function (which its up-facing eye plm doesn't do). namely, $84:f160. this new function seems to sort of substitute, incompletely, for $84:D7C3: Instruction - move PLM up one row and make a blue door facing right
+            // so, we'll complete its job
+            //
+            // forwards compatibility:
+            // beta 11's $84:f160 ends with 'rts' + 3x 0xff (free space)
+            // - if a future version of sm: rotation enlarges this function,
+            //   then the patcher *will give a free space error and not patch the rom* because the freespace is no longer there. then this patch should be deleted.
+            // - if a future version of sm: rotation fixes the bug without enlarging the function,
+            //   then this patch will run on top of it if it still actually calls $84:f160. but it only acts if it finds an invalid (odd-numbered) value so likely still OK.
+            {address: 0x2716c, type: 'overwrite', description: 'fix rotation-specific gadora crash',
+             bytes: [0x20 /* jsr */]}, // incomplete instruction, see next patch
+            {address: 0x2716d, type: 'freespace', // note comment above about intentionally triggering freespace errors in future
+             bytes: [
+                     [0xf2, 0x40].reverse(), // complete the instruction as "JSR $f240": call new function $84:f240
+                     'rts', // overwritten instruction
+                     ].flat()},
+            // new function at $84:f240: correct the plm block index, to point to the left block of the down-facing door;
+            //                                   the BTS bytes for the 4 blocks of the down-facing door; and
+            //                                   the level data's corresponding block types for the 4 blocks
+            {address: 0x27240, type: 'freespace', // note comment above about intentionally triggering freespace errors in future
+             bytes: [
+                     0xbd /* lda x-indexed */, [0x1c, 0x87].reverse(), // LDA $1c87,X  // $1C87..D6: PLM block indices (into $7F:0002)
+                     0x89 /* bit imm */, [0x00, 0x01].reverse(), // test for odd value
+                     'bne', 1, // skip next instruction if odd
+                     'rts', // return if [0x1c87+x] is even
+
+                     // ok, the block index is odd, but it should always be even. this requirement exists because the entries in table $7F:0002 are 1 word in width, whereas the offset pointing into the table is in byte terms
+                     // since it's odd, we know $84:f160 has a bug
+                     0x1a /* inc a */, // undo $84:f160's single decrement - go back to pointing to a full block
+                     0x9d, /* sta x-indexed */, [0x1c, 0x87].reverse(), // STA $1c87,X (... and store the result.)
+
+                     //
+                     // now that we fixed that part...
+                     // the buggy function we modified runs multiple times:
+                     // - 1st time this is called: is the moment the gadora's health reaches 0
+                     // - 2nd time this is called: is around when the gadora death animation ends
+                     // we are going to move the PLM in a moment, except, we when we get called the 2nd time, we don't want to move the PLM again, so it'll be conditional
+                     // - a very separate time this is called: when loading the room with the gadora dead
+                     // so correspondingly,
+                     //   if our fix hasn't been applied, => apply it.
+                     //   if it has, => correct the odd-numbered value at [0x1c87+x] and leave
+                     //   if we're loading the room with the gadora dead, => point the PLM correctly and leave
+                     // we can distinguish these situations because the 4 blocks for the door will have the following BTS values at this point:
+                     // (the below are shown as post-increment, because we've already undone the weird, buggy single decrement that $84:f160 performs every time, and you can't really show the meaning of an invalid in-between pointer anyway)
+                     // if full fix hasn't been applied (hex) -> 00 44 ff 00
+                     //                                             ^ PLM location in the room points to this block
+                     //                                               therefore now we should apply the full fix to all 4 BTS values *and* all 4 block types as well
+                     // if full fix has been applied    (hex) -> 43 ff fe fd
+                     //                                          ^ PLM location in the room points to this leftmost block now
+                     //                                            therefore all we needed was the re-incrementing that we just did, so return
+                     // if loading room w/ dead gadora  (hex) -> 43 ff fe fd
+                     //                                             ^ PLM location in the room points to this incorrect block (mainly seems to cause a graphical glitch if left alone)
+                     //                                               therefore let's point the PLM to 0x43 where it belongs
+                     //
+                     'phx', // push X
+                     0x4a /* lsr a */, // A=PLM's block-location's byte index in BTS table
+                                       //  =PLM's block-location's byte index in level data table / 2
+                                       //  =[0x1c87+x]/2
+                     'tax', // X now indexes into $7f:6402: BTS table, pointing at the BTS of the block that is this PLM's location
+                     'sep', 0x20,
+                     0xbf /* lda x-indexed long */, [0x7f, 0x64, 0x02].reverse(), // LDA $7f6402,X  // $7F:6402..9601: Active BTS table
+                     0xc9 /* cmp imm */, [0x44], // BTS at this PLM's location == 0x44? (Generic shot trigger: 0x44 is used for eye doors. at this point the eye door has been shot to 0 health and is supposed to have been deleted from existing as a BTS, but isn't deleted under the beta 11 bug we're fixing.)
+                     'beq', 8, // goto BTS_0x44_or_BTS_0xff if [$7f6402+(PLM block index/2)] == 0x44
+                     0xc9 /* cmp imm */, [0xff], // BTS at this PLM's location == 0xff? (seems to point to the BTS 1 block to the left?)
+                     'beq', 4, // goto BTS_0x44_or_BTS_0xff if [$7f6402+(PLM block index/2)] == 0xff
+
+                     // nothing to fix, we were just called an extra time, so return.
+                     'rep', 0x20,
+                     'plx', // pull X: X is back to being our PLM index
+                     'rts',
+
+                     // BTS_0x44_or_BTS_0xff:
+                     'rep', 0x20,
+                     'plx', // pull X: X is back to being our PLM index
+                     // move the plm one tile left: [0x1c87+X]-=2
+                     // thus changing the value in this table: $1C87..D6: PLM block indices (into $7F:0002)
+                     0xde, /* dec x-indexed */, [0x1c, 0x87].reverse(), // in-memory decrement of $1c87,X
+                     0xde, /* dec x-indexed */, [0x1c, 0x87].reverse(), // in-memory decrement of $1c87,X
+                     'sep', 0x20,
+                     0xc9 /* cmp imm */, [0xff], // BTS at the PLM's old location == 0xff? (seems to point to the BTS 1 block to the left?)
+                     'rep', 0x20,
+                     'bne', 1, // skip next instruction if the BTS we originally checked was not 0xff (ie, it was 0x44)
+                     'rts', // return if BTS we originally checked was 0xff
+
+                     // BTS we originally checked was 0x44:
+                     // part (2) of full fix: correct the BTS bytes and block types for the 4 door blocks
+                     //   values of A for calls to $84:82B4: Write level data block type and BTS:
+                     //  |vanilla|  |rotation|
+                     //        BTS        BTS
+                     //   #$C0 40 -> #$C0 42
+                     //   #$D0 FF -> #$50 FF
+                     //   #$D0 FE -> #$50 FE
+                     //   #$D0 FD -> #$50 FD
+                     // we perform only the first one here and hand off the rest to $84:D7EF, which sm rotation repurposed for the above latter 3 calls to $84:82B4
+                     //   vanilla  $84:D7EF: Create 3 block vertical extension   (JMP to this and it will PLX:RTS for you)
+                     //   rotation $84:D7EF: Create 3 block horizontal extension (JMP to this and it will PLX:RTS for you)
+                     'phx', // push the PLM index; the target of our upcoming JMP will pull it and return control to the PLM processing routine, where X is expected to be the PLM index
+                     0xbd /* lda x-indexed */, [0x1c, 0x87].reverse(), // LDA $1c87,X  // $1C87..D6: PLM block indices (into $7F:0002)
+                     'tax', // X now indexes into $7f:0002: Level data block table, (with some bits of each word used for indicating block type). it points to the block corresponding to this PLM
+                     0xa9 /* lda imm */, [0xc0, 0x43].reverse(), // set BTS 0x43: Blue door facing down
+                     // set the leftmost BTS
+                     0x20 /* jsr */, [0x82, 0xb4].reverse(), // JSR $82B4: Write level data block type and BTS
+                     // set the other 3 BTSes, then PLX:RTS
+                     0x4c /* jmp 16-bit */, [0xd7, 0xef].reverse(), // JSR $D7EF: Create 3 block horizontal extension
+                     ].flat()},
+        ],
+
+        fasterIntro: [
+            //
+            // change the intro sequence, preserving the credits that were inserted by the author of sm rotation.
+            // (comment block is mostly background info; skip to the bit about $CADF toward the end of it for implementation)
+            //
+            // bank $8B contains a series of functions with relatively little documentation:
+            // game state $1E: Intro handler at $8B:A35B (shared with other game states), calls the function pointer at
+            // $7E:1F51 "Current cinematic function" every frame, plus separately calls function pointers within each cinematic object.
+            // this sole current cinematic function typically checks a condition; once met, it changes $7E:1F51 to point to the next function.
+            // here is part of the pre-ceres chain of such functions - all must be in bank $8B:
+            //   [last object of last text scene sets $7E:1F51 to point to $B72F]
+            //   $B72F -> $BCA0
+            //   ^ie, some iteration of cinematic function $8B:B72F sets $7E:1F51 to point to $(8B:)BCA0 instead of to itself
+            //   $BCA0: does ceres prep, then...
+            //   vanilla $BCA0:
+            //     ceres prep
+            //     loads ceres audio data & plays it now
+            //     $BCA0 -> $BDE4
+            //   rotation $BCA0 (rotation removes ceres here):
+            //     ceres prep
+            //     loads ceres audio data & queues playing it, but "later" = hopefully never
+            //     sets ceres-ridley = dead
+            //     sets $D914 Loading game state = 0x22: Escaping Ceres / landing on Zebes
+            //     $BCA0 -> $C5CA
+            //     ^ie, sets a different next cinematic function vs. the one set by vanilla $BCA0
+            // vanilla post-ceres chain of cinematic functions:
+            //   [ceres exploding goes down a chain of cinematic functions, eventually $C345]
+            //   ... -> $C345 -> $C5CA -> $C610 -> $C627 -> $C699 -> $C79C -> $C7CA -> $A38F (no-op. rts.)
+            //                         \
+            //                    ^^^   -> (see our modification below)
+            //                    |||
+            //                   sm rotation sets $7E:1F51 "Current cinematic function" to $C5CA early, in $BCA0,
+            //                   skipping some cinematic functions (skips $BDE4, $C345, and several functions in between).
+            //                   thus, ceres never starts or happens.
+            // most cinematic functions from $C5CA onward are the 'flying to zebes' scene, which sm rotation preserves, but we want to remove.
+            // also, the chain goes further than the above, all cinematics:
+            //   [the 'planet zebes' text object, as its own last instruction, sets $7E:1F51 to point to $C9F9]
+            //   $C9F9 -> $CA36 -> $CA85 -> $CAD0 -> $CADE (no-op. rts.)
+            //   [the Zebes Stars 5 object changes its own function pointer from $82:C8AA to $82:C8B9]
+            //   [the Zebes Stars 5 object, in its new function, checks if -128 < (stars' y-position) < 0;
+            //                              if yes, sets $7E:1F51 to point to $CADF]
+            //   $CADF -> (no next cinematic function whatsoever; $CADF transitions game state to 6 (Loading) instead, and the game state 6 handler takes over)
+            //    ^^^
+            //    |||
+            //   our modification will set $7E:1F51 "Current cinematic function" to $CADF early, in $C5CA,
+            //   skipping some cinematic functions (skips $C610, $CAFE, and several functions in between).
+            //   thus, flying-to-zebes never happens.
+            //
+            {address: 0x5c604, type: 'overwrite', description: 'speedup rotation intro',
+             bytes: [0xca, 0xdf].reverse()},
+            // sm rotation does some weird modification of the loading of ceres audio data that's done in $8B:BCA0 (presumably the audio data needs to be loaded in in order to be used in flying-to-zebes, which sm rotation preserves, but we want to remove).
+            // when we land on zebes extra early like with the above change, there's some artifact still left in the audio queue that was put there by $8B:BCA0.
+            // the artifact in the queue leads to no music when the landing site is initially displayed, and to a small glitch and delay when samus disembarks.
+            // luckily, by this point (around the end of intro text), no audio is needed in any further cinematics, because we've decided there will be no further cinematics!
+            // so just NOP out the loading of audio data at the end of the intro text:
+            {address: 0x5bdd5, type: 'overwrite',
+             bytes: [0xea, 0xea, 0xea, 0xea]}, // NOP out the JSL instruction at $8B:BDD5
+            {address: 0x5bddf, type: 'overwrite',
+             bytes: [0xea, 0xea, 0xea, 0xea]}, // NOP out the JSL instruction at $8B:BDDF
+            //
+            // faster text scene (the other part of the speedup):
+            //
+            // cinematic intro text page 1 (of 1 in sm rotation): end early, skipping hundreds of 1-frame 'nothing' objects.
+            // insert a 'go to'
+            // NOTE: this modifies an entry in list of *variable-length* cinematic instructions.
+            //       therefore, if in future versions of sm rotation, something changes in this scene other than the text/duration/positioning,
+            //       this patch could crash because it might have overwritten the middle of some other instruction instead of the beginning of a new one.
+            //
+            {address: 0x64739, type: 'overwrite',
+             bytes: [
+                     [0x97, 0x1e].reverse(), // 'go to/goto'. instructs to call $8B:971E. $8B:971E: Instruction - go to [[Y]]
+                     [0xd5, 0xd3].reverse(), // parameter for $8B:971E. param=$8C:D5D3. target address of 'go to/goto' in bank $8C
+                     ].flat()},
+            // modify the duration of final wait at the end of the text scene @ $8C:D5D3
+            // the value below can be modified again if a more ideal delay is found.
+            // (quirk: the sm rotation text page 1 ending, uses vanilla's text page 6 ending without modifying page 6 ending address)
+            {address: 0x655D5, type: 'overwrite',
+             bytes: [0x00, 0x1e].reverse()}, // change delay from 0x0080 to 0x001e frames
+            // the rest: make the text print faster @ $8c:c383 data
+            //           - the object data is already modified by sm rotation, we modify it further
+            //           - implemented as many single-byte modifications:
+            //             - this avoids overwriting the letters & their positions in future sm rotation updates
+            //           - this could be generated here in a loop in our code, but that would be less portable if patches change language in future
+            // every 6 bytes from 0x6438B (an object for the letter 'S') through 0x6454D (a 'C') (inclusive): set to 2 frames instead of 5 frames
+            {address: 0x6438b, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64391, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64397, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6439d, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643a3, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643a9, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643af, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643b5, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643bb, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643c1, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643c7, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643cd, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643d3, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643d9, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643df, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643e5, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643eb, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643f1, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643f7, type: 'overwrite', bytes: [0x02]},
+            {address: 0x643fd, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64403, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64409, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6440f, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64415, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6441b, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64421, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64427, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6442d, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64433, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64439, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6443f, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64445, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6444b, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64451, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64457, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6445d, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64463, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64469, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6446f, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64475, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6447b, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64481, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64487, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6448d, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64493, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64499, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6449f, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644a5, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644ab, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644b1, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644b7, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644bd, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644c3, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644c9, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644cf, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644d5, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644db, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644e1, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644e7, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644ed, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644f3, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644f9, type: 'overwrite', bytes: [0x02]},
+            {address: 0x644ff, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64505, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6450b, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64511, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64517, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6451d, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64523, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64529, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6452f, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64535, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6453b, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64541, type: 'overwrite', bytes: [0x02]},
+            {address: 0x64547, type: 'overwrite', bytes: [0x02]},
+            {address: 0x6454d, type: 'overwrite', bytes: [0x02]},
+            // every 6 bytes from 0x64553 (an object for the letter 'T') through 0x64589 (a 'O') (inclusive): set to 3 frames instead of 5 frames
+            {address: 0x64553, type: 'overwrite', bytes: [0x03]},
+            {address: 0x64559, type: 'overwrite', bytes: [0x03]},
+            {address: 0x6455f, type: 'overwrite', bytes: [0x03]},
+            {address: 0x64565, type: 'overwrite', bytes: [0x03]},
+            {address: 0x6456b, type: 'overwrite', bytes: [0x03]},
+            {address: 0x64571, type: 'overwrite', bytes: [0x03]},
+            {address: 0x64577, type: 'overwrite', bytes: [0x03]},
+            {address: 0x6457d, type: 'overwrite', bytes: [0x03]},
+            {address: 0x64583, type: 'overwrite', bytes: [0x03]},
+            {address: 0x64589, type: 'overwrite', bytes: [0x03]},
+            // every 6 bytes from 0x6458F (an object for the letter 'R') through 0x6459B (a 'U') (inclusive): set to 3 frames instead of 5 frames
+            {address: 0x6458f, type: 'overwrite', bytes: [0x03]},
+            {address: 0x64595, type: 'overwrite', bytes: [0x03]},
+            {address: 0x6459b, type: 'overwrite', bytes: [0x03]}
+            // (last 7 characters are left as 5 frames so that the typing sound doesn't last for a long time after all the letters have appeared)
+        ],
+
+        plmLocationPatchGenerator: function() {
+            let patches = []
+            // 96 out of 100 items work great in rotation with just copying their plm id.
+            // only quirk is, sm rotation beta 11 has swapped the positions of the other 4 items, which are all missile packs in a non-rando.
+            // let's swap them back to their traditional positions by creating a patch for the x & y positions of these 4 PLMs.
+            plms = [
+             {// correct location of ocean missiles (in rotation, was @ maze missiles @ (0x30, 0x02))
+              plmOffsetInRom: 0x781e8, newX: 0x04, newY: 0x02},
+             {// correct location of maze missiles (in rotation, was @ ocean missiles @ (0x04, 0x02))
+              plmOffsetInRom: 0x781f4, newX: 0x30, newY: 0x02},
+             {// correct location of big pink missiles outside charge (in rotation, was @ middle of big pink missiles near grapple blocks @ (0x6d, 0x24))
+              plmOffsetInRom: 0x7860e, newX: 0x38, newY: 0x22},
+             {// correct location of middle of big pink missiles near grapple blocks (in rotation, was @ big pink missiles outside charge @ (0x38, 0x22))
+              plmOffsetInRom: 0x78608, newX: 0x6d, newY: 0x24}
+            ]
+            plms.forEach(function (plm) {
+
+                // edit PLM:
+                //  ____________ PLM ID - or more accurately, PLM entry (definition) address in bank $84
+                // |     _______ X position
+                // |    |   ____ Y position
+                // |    |  |   _ Parameter - not important here but FYI, for item PLMs, Parameter is the unique item location ID indexing into the $7E:D870..AF array
+                // |    |  |  |
+                // iiii xx yy pppp
+                patches.push({address: plm['plmOffsetInRom'] + 2, type: 'overwrite',
+                              bytes: [plm['newX'], plm['newY']]})
+             })
+            return patches
+        },
+
+        allpatches: function() {
+            let patches = []
+            patches.push(...romhacks.rotation.zebesAwakeningPatch)
+            patches.push(...romhacks.rotation.bombTorizoPatch)
+            patches.push(...romhacks.rotation.fixEscapeClimb)
+            patches.push(...romhacks.rotation.fixRidleyAndDraygonGadoras)
+            patches.push(...romhacks.rotation.fasterIntro)
+            patches.push(...romhacks.rotation.plmLocationPatchGenerator())
+            return patches
+        },
+    }
+    // end rotation
+}
