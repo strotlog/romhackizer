@@ -149,7 +149,7 @@ function romOffsetFromSnesAddrString(snesAddrString) {
 
 loadedroms = {}
 
-function addRomFiles(purpose, filesarr) {
+async function addRomFiles(purpose, filesarr) {
 
     if (filesarr.length === 0) {
         return
@@ -172,7 +172,7 @@ function addRomFiles(purpose, filesarr) {
 
 let g_completed = false
 
-function updateState() {
+async function updateState() {
     if ('rando' in loadedroms) {
         document.getElementById('spanIdRandoRomFilename').textContent = loadedroms['rando'].filename
     }
@@ -184,7 +184,8 @@ function updateState() {
     }
     if ('rando' in loadedroms && 'vanilla' in loadedroms && 'romhackIps' in loadedroms) {
         document.getElementById('aIdDownloadLink').textContent = '' // remove link (if any previous one was shown)
-        document.getElementById('divIdZfactorNote').style.visibility = 'hidden' // reset if warning is shown
+        document.getElementById('divIdRotationNote').style.visibility = 'hidden' // more reset
+        document.getElementById('divIdZfactorNote').style.visibility = 'hidden'
         // determine romhack. a checksum would be nice, but length works in a pinch
         let hackname
         if (loadedroms['romhackIps'].allbytes.length == 917097) {
@@ -232,7 +233,7 @@ function updateState() {
                 loadedroms['romhack'].allbytes[i] = 0xff
             }
             // create romhack
-            romhackmod = readips(loadedroms['romhackIps'].allbytes)
+            romhackmod = readips(loadedroms['romhackIps'].allbytes, 'romhack ips')
             if (romhackmod.length == 0) { // invalid ips
                 return
             }
@@ -273,9 +274,7 @@ function updateState() {
             updateDownload('SM ' + prettyHackname + ' with items copied from ' + loadedroms['rando'].filename,
                            loadedroms['romhack'].allbytes,
                            'Download Modified SM: ' + prettyHackname)
-            if (hackname == 'zfactor') {
-                document.getElementById('divIdZfactorNote').style.visibility = 'visible'
-            }
+
         }
     }
 }
@@ -299,100 +298,128 @@ function archipelagoRidiculum(hackname) {
             'js-yaml'    : ["https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist"],
         },
     });
+    // kick off a little chain of getting requirements and running a callback
     requirejs(['compressjs/main.min' /* requirejs will expands 'compressjs' before slash to become the URL directory we specified in 'paths', and will append '.js' to the end */,
                'js-yaml/js-yaml.min',
                'archipelago' /* ie, ./archipelago.js which must be written in a requirejs module-y way */,
                ], function(compressjs, jsyaml, archipelago) {
-        console.log('loaded requirements')
-        cjs = compressjs
-        jsy = jsyaml
-        archi = archipelago
-        fetch("https://raw.githubusercontent.com/strotlog/SMBasepatch/zfactor/build/romhacks/" + hackname + "/multiworld-basepatch.ips").then(
-            (response) => response.blob()).then(
-            (basepatch_blob) => basepatch_blob.arrayBuffer()).then(function (basepatch_arraybuffer) {
-                console.log('fetched ips')
-                let basepatch_ips = new Uint8Array(basepatch_arraybuffer)
-                let basepatch = readips(basepatch_ips)
-                if (basepatch.length == 0) {
-                    console.log('failed to process basepatch')
-                    return -1
-                }
-                let localpatches = []
-                if (hackname == 'rotation') {
-                    localpatches = romhacks.rotation.patchmain({hasRoms: false})
-
-                    if (checkForOverlappingPatches(localpatches)) {
-                        return -1
-                    }
-                    localpatches = assembleUnambiguousInstructions(localpatches)
-                    if (localpatches.length === 0) {
-                        return -1
-                    }
-                } else if (hackname == 'zfactor') {
-                    localpatches = romhacks.zfactor.patchmain({hasRoms: false})
-
-                    if (checkForOverlappingPatches(localpatches)) {
-                        return -1
-                    }
-                    localpatches = assembleUnambiguousInstructions(localpatches)
-                    if (localpatches.length === 0) {
-                        return -1
-                    }
-                }
-
-                // see if basepatch overlaps with our local patches that are specific to randoing this romhack
-                let combinedpatches = []
-                combinedpatches.push(...basepatch)
-                combinedpatches.push(...localpatches) // pretty much all the patches aside from the bsdiff itself
-                if (checkForOverlappingPatches(combinedpatches)) {
-                    return -1
-                }
-                let romhackmod = readips(loadedroms['romhackIps'].allbytes)
-                if (romhackmod.length == 0) {
-                    console.log('failed to process romhack ips')
-                    return -1
-                }
-                // patch order is:
-                //     1) start a fresh bsdiff patch based on vanilla
-                //    we specify the order of these three right here:
-                //    {
-                //     2) add romhack (now it's the romhack)
-                //     3) add AP basepatch tailored to the addresses available in this specific romhack
-                //     4) add localpatches
-                //    }
-                //     5) copy items from apsm
-                //     6) copy seed-specific data from apsm over top of some of the AP basepatch
-                let finished_apsm = archi.archipelagomagic(loadedroms['apsm'].allbytes,
-                                                           [romhackmod, basepatch, localpatches], /* order of patching is important! */
-                                                           loadedroms['vanilla'].allbytes,
-                                                           romhacks.offsetsInRomOf100ItemPlms,
-                                                           hackname,
-                                                           (hackname == 'zfactor' ? {fromAp: romhacks.zfactor.sm_to_zf_mapping,
-                                                                                    leaveAsRegularItem: romhacks.zfactor.zf_unmodified_except_sram_bit}
-                                                                                 : null))
-                let arraybuffer = new ArrayBuffer(finished_apsm.buffer, finished_apsm.byteOffset, finished_apsm.byteLength)
-                let verb
-                if (hackname == 'rotation') {
-                    verb = 'Rotated'
-                } else if (hackname == 'zfactor') {
-                    verb = 'Zfactored'
-                }
-                updateDownload(verb + ' ' + loadedroms['apsm'].filename,
-                               finished_apsm,
-                               'Download ' + verb + ' AP Multiworld World (beta)')
-
-                if (hackname == 'zfactor') {
-                    document.getElementById('divIdZfactorNote').style.visibility = 'visible'
-                }
-
-            }) //.catch(error => console.log(error)) // better to have the debugger catch it
+        // kick off the rest of the work (cannot await it here since requirejs doesn't allow async/promises)
+        archipelagoRidiculum_continued(hackname, compressjs, jsyaml, archipelago)
     })
+}
 
+var g_archi // for debugging
+
+async function archipelagoRidiculum_continued(hackname, compressjs, jsyaml, archipelago) {
+
+    console.log('loaded requirements')
+    let cjs = compressjs
+    let jsy = jsyaml
+    let archi = archipelago
+    g_archi = archipelago
+    let basepatch_ips = await fetchFileAndGetBytes("https://raw.githubusercontent.com/strotlog/SMBasepatch/zfactor/build/romhacks/" + hackname + "/multiworld-basepatch.ips")
+    console.log('fetched basepatch ips')
+    let basepatch = readips(basepatch_ips, 'basepatch ips')
+    if (basepatch.length == 0) {
+        console.log('failed to process basepatch')
+        return -1
+    }
+    let externalpatches = []
+    if (hackname == 'zfactor') {
+        // fixes from z-factor rando by galamoz!
+        let galapatch1_ips = await fetchFileAndGetBytes("https://raw.githubusercontent.com/Galamoz/Z-Factor-ItemRandomizer/master/Patches/Level%20Patch.IPS")
+        let galapatch1 = readips(galapatch1_ips, "Level Patch.IPS")
+        let galapatch2_ips = await fetchFileAndGetBytes("https://raw.githubusercontent.com/Galamoz/Z-Factor-ItemRandomizer/master/Patches/Zebes%20Awakens%20Patch.IPS")
+        let galapatch2 = readips(galapatch2_ips, "Zebes Awakens Patch.IPS")
+        if (galapatch1.length == 0 || galapatch2.length == 0) {
+            console.log("failed to process zfactor-specific IPSes, check that the links are alive?")
+        }
+        externalpatches.push(...galapatch1)
+        externalpatches.push(...galapatch2)
+    }
+    let localpatches = []
+    if (hackname == 'rotation') {
+        localpatches = romhacks.rotation.patchmain({hasRoms: false})
+
+        if (checkForOverlappingPatches(localpatches)) {
+            return -1
+        }
+        localpatches = assembleUnambiguousInstructions(localpatches)
+        if (localpatches.length === 0) {
+            return -1
+        }
+    } else if (hackname == 'zfactor') {
+        localpatches = romhacks.zfactor.patchmain({hasRoms: false})
+
+        if (checkForOverlappingPatches(localpatches)) {
+            return -1
+        }
+        localpatches = assembleUnambiguousInstructions(localpatches)
+        if (localpatches.length === 0) {
+            return -1
+        }
+    }
+
+    // see if basepatch overlaps with our local patches that are specific to randoing this romhack
+    let combinedpatches = []
+    combinedpatches.push(...basepatch)
+    combinedpatches.push(...localpatches)
+    if (checkForOverlappingPatches(combinedpatches)) {
+        return -1
+    }
+    let romhackmod = readips(loadedroms['romhackIps'].allbytes, 'romhack ips')
+    if (romhackmod.length == 0) {
+        console.log('failed to process romhack ips')
+        return -1
+    }
+    // patch order is:
+    //     1) start a fresh bsdiff patch based on vanilla
+    //    we specify the order of these three right here:
+    //    {
+    //     2) add romhack (now it's the romhack)
+    //     3) add AP basepatch tailored to the addresses available in this specific romhack
+    //     4) add any external patches
+    //     5) add localpatches
+    //    }
+    //     6) copy items from apsm
+    //     7) copy seed-specific data from apsm over top of some of the AP basepatch
+    let finished_apsm = archi.archipelagomagic(loadedroms['apsm'].allbytes,
+                                               [romhackmod, basepatch, externalpatches, localpatches], /* note, putting the romhack first is important, since we overwrite some of its stuff! */
+                                               loadedroms['vanilla'].allbytes,
+                                               romhacks.offsetsInRomOf100ItemPlms,
+                                               hackname,
+                                               (hackname == 'zfactor' ? {fromAp: romhacks.zfactor.sm_to_zf_mapping,
+                                                                        leaveAsRegularItem: romhacks.zfactor.zf_unmodified_except_sram_bit}
+                                                                     : null))
+    let arraybuffer = new ArrayBuffer(finished_apsm.buffer, finished_apsm.byteOffset, finished_apsm.byteLength)
+    let verb
+    if (hackname == 'rotation') {
+        verb = 'Rotated'
+    } else if (hackname == 'zfactor') {
+        verb = 'Zfactored'
+    }
+    updateDownload(verb + ' ' + loadedroms['apsm'].filename,
+                   finished_apsm,
+                   'Download ' + verb + ' AP Multiworld World (beta)')
+
+    if (hackname == 'rotation') {
+        document.getElementById('divIdRotationNote').style.visibility = 'visible'
+    } else if (hackname == 'zfactor') {
+        document.getElementById('divIdZfactorNote').style.visibility = 'visible'
+    }
 
     return 0
 }
 
-function readips(binary) {
+async function fetchFileAndGetBytes(url) {
+    let response = await fetch(url)
+    let file_blob = await response.blob()
+    let file_arraybuffer = await file_blob.arrayBuffer()
+    let file_bytearray = new Uint8Array(file_arraybuffer)
+    return file_bytearray
+}
+
+function readips(binary, description) {
     let ret = []
     let i = 5
     while (i < binary.length-3) {
@@ -418,6 +445,7 @@ function readips(binary) {
         console.log('ips failed to parse! i=' + i + ', length=' + binary.length)
         return []
     }
+    ret[0]['description'] = description // applies only to one tiny byte sequence, just to keep some boundaries and reduce verbosity
     return ret
 }
 
@@ -468,7 +496,7 @@ document.addEventListener('DOMContentLoaded', function (event) {
     <p>This is not exactly a randomizer. Instead, it copies the locations of all the items from a <strong><a href="https://varia.run/">VARIA Randomizer</a></strong> ROM seed that you provide. (VARIA itself may include a rotation randomizer soon.)</p>
     <p>This:</p>
     <ul>
-        <li>For SM: Rotation, applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door; 4. BT wakes; 5. balanced suits; 6. screw attack menuing; 7. speed echoes in heated room; 8. spring change in bounce crash fix; 9. escape-climb softlock fix; 10. down-facing gadora crash fix; 11. max ammo equip screen; 12. suit pickup restores position; 13. faster intro" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">several code patches</dfn>. Other hacks have fewer tweaks in this program. Check console log. Beyond these changes, it is exactly like the romhack except the items are moved. Be careful and save!</li>
+        <li>For SM: Rotation, applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door; 4. BT wakes; 5. balanced suits; 6. screw attack menuing; 7. speed echoes in heated room; 8. spring change in bounce crash fix; 9. escape-climb softlock fix; 10. down-facing gadora crash fix; 11. max ammo equip screen; 12. suit pickup restores position; 13. faster intro" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">several code patches</dfn>. Check console log. For Z-Factor Archipelago, a limited subset is applied, plus Galamoz's ZF Rando patches are fetched and applied, with Gala's generous permission. Beyond these changes, it is exactly like the romhack except the items are moved. Be careful and save!</li>
         <li><strong>Does not ensure the seed is completable.</strong></li>
         <li>Will not show errors plainly yet - check your browser's console if a download link doesn't appear.</li>
         <li>Will not upload or store anything - it's all in your browser. (This means links generated are very temporary and local to this tab.)</li>
@@ -503,8 +531,12 @@ document.addEventListener('DOMContentLoaded', function (event) {
             <a href='#' download='' id='aIdDownloadLink'></a>
         </h3>
     </div>
-    <div id='divIdZfactorNote' style='visibility: hidden; font-size: 18px'>
-        &#9888; <!-- warning sign, unicode decimal --> After running SNIClient, you must download and apply to your ROM both <strong>Level Patch.IPS</strong> and <strong>Zebes Awakens Patch.IPS</strong> from <a href='https://github.com/Galamoz/Z-Factor-ItemRandomizer/tree/master/Patches' id='aIdDownloadLink'>Galamoz's Z-Factor Rando</a> before playing!
+    <div id='divIdRotationNote' style='visibility: hidden; font-size: 16px'>
+        Enjoy Rotation romhack by SMILEuser96.
+    </div>
+    <div id='divIdZfactorNote' style='visibility: hidden; font-size: 16px'>
+        <!-- note, external patches patching doesn't happen for plain sfc patching (which is completely synchronous). so to keep us honest, these messages don't show except in the AP code path. -->
+        Enjoy Z-Factor romhack by Metaquarius. External patches: fetched and applied Z-Factor rando patches by Galamoz.
     </div>
 </body>
 <!-- include our scripts directly, except archipelago.js (which uses dependencies, see below) -->
