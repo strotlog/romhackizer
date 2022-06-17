@@ -40,7 +40,7 @@ var generalpatches = {
     ],
 
     springBallCrash: [
-    // code patch (8): fix obscure vanilla bug where turning off spring ball while bouncing can crash in $91:EA07:
+    // fix obscure vanilla bug where turning off spring ball while bouncing can crash in $91:EA07:
     // overwrite unreachable code at $91:fc4a (due to pose 0x65 not existing).
     // translate RAM $0B20 values #$0601 and #$0602 (seem spring ball related)
     // to valid array indices #$0001 and #$0002, respectively (values expected by $91:EA07)
