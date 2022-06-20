@@ -291,6 +291,17 @@ class archipelagoclass {
             this.bsdiff_apromhacked.overwrite(romOffsetFromSnesAddrString(smgraphicstarget),
                                               graphics)
         }
+        let playerIdTarget = table.find((e) => e.symbol == "config_player_id").new
+        let playerIdBytes = this.bsdiff_apromhacked.read(this.vanillaSm, romOffsetFromSnesAddrString(playerIdTarget), 2)
+        if (playerIdBytes[0] == 0xFF && playerIdBytes[1] == 0xFF) { // no player ID yet
+            let titlebytes = this.bsdiff_apromhacked.read(this.vanillaSm, 0x7fc0, 21)
+            let title = (new TextDecoder(/* default utf-8, will work */)).decode(new Uint8Array(titlebytes))
+            let match = /^SM\d+_(\d+)_/.exec(title)
+            let playerid = parseInt(match[1])
+            console.log("workaround versioning issues: adding config_player_id manually (detected player " + playerid + ")")
+            this.bsdiff_apromhacked.overwrite(romOffsetFromSnesAddrString(playerIdTarget),
+                                              [playerid & 0xff, (playerid >> 8) & 0xff])
+        }
     }
 
     copyRandoToZip() {
@@ -312,6 +323,7 @@ copyFromMultiWorldTo_Rotation = [
     {"symbol" : "offworld_graphics", "new": "89:9100", "old": "89:9100", "length": 512, vanilla: 0x00 },
     {"symbol" : "config_deathlink", "new": "CE:FF04", "old": "CE:FF04", "length": 1, vanilla: 0xFF },
     {"symbol" : "config_remote_items", "new": "CE:FF06", "old": "CE:FF06", "length": 1, vanilla: 0xFF },
+    {"symbol" : "config_player_id", "new": "CE:FF08", "old": "CE:FF08", "length": 2, vanilla: [0xFF, 0xFF] },
     {"symbol" : "rando_player_table", "new": "E2:D000", "old": "B8:D000", "length": 2048, vanilla: 0xFF },
     {"symbol" : "rando_player_id_table", "new": "E2:D800", "old": "B8:D800", "length": 400, vanilla: 0xFF },
     {"symbol" : "snes_header_game_title", "new": "80:FFC0", "old": "80:FFC0", "length": 21, vanilla: 'Super Metroid'.padEnd(21, ' ')}
@@ -326,6 +338,7 @@ copyFromMultiWorldTo_Zfactor = [
     {"symbol" : "offworld_graphics", "new": "89:9100", "old": "89:9100", "length": 512, vanilla: 0x00 },
     {"symbol" : "config_deathlink", "new": "CE:FF04", "old": "CE:FF04", "length": 1, vanilla: 0xFF },
     {"symbol" : "config_remote_items", "new": "CE:FF06", "old": "CE:FF06", "length": 1, vanilla: 0xFF },
+    {"symbol" : "config_player_id", "new": "CE:FF08", "old": "CE:FF08", "length": 2, vanilla: [0xFF, 0xFF] },
     {"symbol" : "rando_player_table", "new": "E5:D000", "old": "B8:D000", "length": 2048, vanilla: 0xFF },
     {"symbol" : "rando_player_id_table", "new": "E5:D800", "old": "B8:D800", "length": 400, vanilla: 0xFF },
     {"symbol" : "snes_header_game_title", "new": "80:FFC0", "old": "80:FFC0", "length": 21, vanilla: 'Super Metroid'.padEnd(21, ' ')}
