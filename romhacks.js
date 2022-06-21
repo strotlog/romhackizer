@@ -537,6 +537,35 @@ var romhacks = {
             // (last 7 characters are left as 5 frames so that the typing sound doesn't last for a long time after all the letters have appeared)
         ],
 
+        // SM rotation bug (as of latest=sm rotation beta 11): game can crash (technically infinite loop) if you drop a pb at the top (new) of croc escape room
+        fixCrocEscapeCrash: [
+            // point croc escape room setup asm (in its 1 state) to a new function. was: simply pointing to a RTS function
+            {address: 0x7aa33, type: 'overwrite', description: 'fix croc escape pb\'ing bad block crash',
+             bytes: [0xea, 0x90].reverse()}, // -> new setup asm function at $8f:ea90
+            {address: 0x7ea90, type: 'freespace', // new setup asm function at $8f:ea90:
+             bytes: [0xaf /* lda.l absolute */, [0x7f, 0x00, 0x56].reverse(), // check block 2A tile data
+                     0x29 /* and imm */, [0xf0, 0x00].reverse(), // high nibble only (= tile type)
+                     0xc9 /* cmp imm */, [0x50, 0x00].reverse(),
+                     'beq', 1, // return unless tile type == 5 (horizontal extension block)
+                     'rts',
+                     // repeat for block 0x2B:
+                     0xaf /* lda.l absolute */, [0x7f, 0x00, 0x58].reverse(), // check block 2B tile data
+                     0x29 /* and imm */, [0xf0, 0x00].reverse(),
+                     0xc9 /* cmp imm */, [0x50, 0x00].reverse(),
+                     'beq', 1,
+                     'rts',
+                     0xaf /* lda.l absolute */, [0x7f, 0x64, 0x2c].reverse(), // check block 2A+2B BTS data
+                     0xc9 /* cmp imm */, [0xff, 0x01].reverse(), // high byte (2B's BTS) == FF (== -1 meaning point to 2A) && low byte (2A's BTS) == 01 (meaning point to 2B)
+                     'bne', 1, // return unless infinite loop detected
+                     'rts',
+                     // infinite loop bug detected, if samus were to pb and the explosion hits tile 2A or 2B, the game's dead
+                     // simply make the left one point left and the right one point right, instead of to each other:
+                     'xba', // swap the BTS bytes of the two blocks within the accumulator
+                     0x8f /* sta.l absolute */, [0x7f, 0x64, 0x2c].reverse(), // ovewrite block 2A+2B BTS data
+                     'rts' // return
+                     ].flat()},
+        ],
+
         plmLocationPatchGenerator: function() {
             let patches = []
             // 96 out of 100 items work great in rotation with just copying their plm id.
@@ -574,6 +603,7 @@ var romhacks = {
             patches.push(...romhacks.rotation.fixEscapeClimb)
             patches.push(...romhacks.rotation.fixRidleyAndDraygonGadoras)
             patches.push(...romhacks.rotation.fasterIntro)
+            patches.push(...romhacks.rotation.fixCrocEscapeCrash)
             patches.push(...romhacks.rotation.plmLocationPatchGenerator())
             return patches
         },
