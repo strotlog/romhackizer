@@ -612,9 +612,11 @@ var romhacks = {
 
     zfactor: {
         sm_to_zf_mapping: {
+        // mapping contributed by ironrusty:
         // from a WIP spreadsheet based on where's locked by what in varia vanilla 'newbie' logic
         // sm    :  zfactor item
-        // (string is the way of making hex json compatible, lowercasing matches js toString(16) (important))
+        // string is the way of making hex json compatible, lowercasing matches js toString(16) (important)
+        // note to self: s/\(.*\)	\(.*\)	\(.*\)	\(.*\)/    '0X\2': '0X\4',/
         '0x781cc': '0x7d6ef',
         '0x781e8': '0x7d975',
         '0x781ee': '0x7c911',
@@ -706,8 +708,8 @@ var romhacks = {
         '0x7c533': '0x7da55',
         '0x7c559': '0x7d93b',
         '0x7c5dd': '0x7da81',
-        '0x7c5e3': '0x7dbe7',
-        '0x7c5eb': '0x7da15',
+        '0x7c5e3': '0x7da15',
+        '0x7c5eb': '0x7dbe7',
         '0x7c5f1': '0x7d9cb',
         '0x7c603': '0x7dc2d',
         '0x7c609': '0x7dbd1',
