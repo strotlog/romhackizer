@@ -66,6 +66,30 @@ class archipelagoclass {
         }
     }
 
+    getHiddenness(plmid) {
+        // given a vanilla PLM id such as 0xef13 "plasma, visible", return whether it is
+        // 'visible', 'chozo', 'hidden', or 'unknown'
+        // does not handle archipelago PLM ids, nor some varia rando-specific PLM ids
+        let hiddenstate
+        if        (0xeed7 <= plmid &&
+                             plmid <= 0xef27) {
+            hiddenstate = 'visible'
+        } else if (0xef2b <= plmid &&
+                             plmid <= 0xef7b) {
+            hiddenstate = 'chozo'
+        } else if (0xef7f <= plmid &&
+                             plmid <= 0xefcf) {
+            hiddenstate = 'hidden'
+        } else if (plmid == 0xbaed) {
+            // 0xbaed varia items are hidden, but NOTE cannot guess whether 0xbae9 varia item is visible vs chozo
+            // but this probably isn't neeeded anyway
+            hiddenstate = 'hidden'
+        } else {
+            hiddenstate = 'unknown'
+        }
+        return hiddenstate
+    }
+
     copy100PlmsAndNothings() {
         let ap_inferredplms = {}
         let romhack_ap_plms = {}
@@ -126,66 +150,71 @@ class archipelagoclass {
             }
         }
         for (const address of this.offsetsInRomOf100ItemPlms) {
-            let newaddress
+            let apPlmIdBytes = this.bsdiff_from_ap.read(this.vanillaSm /* basis of the bsdiff */, address, 2) // read from AP
+            let apPlmId = apPlmIdBytes[0] + apPlmIdBytes[1]*256
             if (this.itemMapping == null) {
                 newaddress = address // all item locations are the same
+                // see patchmain in other file for comments detailing PLM codes
+                if (apPlmId == 0xbae9) {
+                    // 'nothing' chozo or 'nothing' in the open PLM (convert varia plm 0xbae9 -> vanilla plm 0xb62f)
+                    this.bsdiff_apromhacked.overwrite(address, [0x2f, 0xb6])
+                } else if (apPlmId == 0xbaed) {
+                    // 'nothing' hidden PLM (convert varia plm 0xbaed -> hackery achieving the same thing)
+                    this.bsdiff_apromhacked.overwrite(address, [0x83, 0xef]) // missile shot block PLM 0xef83
+                    this.bsdiff_apromhacked.overwrite(address+4, [0x20, 0x05]) // 0x0520 hackery to avoid new PLM (see patchmain comments)
+                } else {
+                    // main overwrite!
+                    this.bsdiff_apromhacked.overwrite(newaddress, plm)
+                }
             } else {
                 // convert vanilla item locations to romhack item locations
-                newaddress = parseInt(this.itemMapping.fromAp['0x' + address.toString(16)])
-            }
-
-            let plm = this.bsdiff_from_ap.read(this.vanillaSm /* basis of the bsdiff */, address, 2)
-            let itemcopied = plm[0] + plm[1]*256
-            // see patchmain in other file for comments detailing PLM codes
-            if (itemcopied == 0xbae9) {
-                this.bsdiff_apromhacked.overwrite(newaddress, [0x2f, 0xb6]) // 'nothing' chozo or 'nothing' in the open
-            } else if (itemcopied == 0xbaed) {
-                this.bsdiff_apromhacked.overwrite(newaddress, [0x83, 0xef]) // 'nothing' shot block
-                this.bsdiff_apromhacked.overwrite(newaddress+4, [0x20, 0x05]) // hackery to avoid new PLM (see patchmain comments)
-            } else if (itemcopied == 0) {
-                console.log('Error: we read PLM value of 0 (should be a ROM pointer) @ rom offset 0x' + address.toString(16))
-            } else if (this.itemMapping == null) {
-                // main overwrite!
-                this.bsdiff_apromhacked.overwrite(newaddress, plm)
-            } else if(itemcopied in ap_inferredplms) {
-                // we know exactly what type of PLM this is, and can discard the PLM ID
-                // infer the hidden-ness level of the romhack's original item (must do this before overwriting the PLM)
+                let newaddress = parseInt(this.itemMapping.fromAp['0x' + address.toString(16)])
                 let romhackOrigPlmBytes = this.bsdiff_apromhacked.read(this.vanillaSm, newaddress, 2)
                 let romhackOrigPlm = romhackOrigPlmBytes[0] + romhackOrigPlmBytes[1]*256
-                let hiddenstate
-                // if romhack uses original item PLMs, they will fall in these ranges:
-                if        (0xeed7 <= romhackOrigPlm &&
-                                     romhackOrigPlm <= 0xef27) {
-                    hiddenstate = 'visible'
-                } else if (0xef2b <= romhackOrigPlm &&
-                                     romhackOrigPlm <= 0xef7b) {
-                    hiddenstate = 'chozo'
-                } else if (0xef7f <= romhackOrigPlm &&
-                                     romhackOrigPlm <= 0xefcf) {
-                    hiddenstate = 'hidden'
-                } else {
-                    hiddenstate = 'unknown'
+                // get the hidden-ness level of the romhack's original item (must do this before overwriting the PLM)
+                // if romhack uses original item PLMs, as we expect, they will fall in the vanilla range and are known easily
+                let hiddenstate = this.getHiddenness(romhackOrigPlm)
+                if (hiddenstate == 'unknown') {
+                    console.log('Error: failed to grok romhack PLM id 0x' + romhackOrigPlm.toString(16) + ' @ ROM file address 0x' + newaddress.toString(16) + '. need to know if this is originally a visible/chozo/hidden item in the base romhack!')
+                    return
                 }
-                if (hiddenstate != 'unknown') {
+
+                if (apPlmId == 0xbae9 || apPlmId == 0xbaed) {
+                    // we want to copy a 'nothing' item
+                    // we don't care which type of 'nothing' (0xbae9 vs 0xbaed) AP tells us, since that depends only on whether the vanilla/AP location is hidden or not -
+                    // rather, we care whether the *romhack* location is hidden or not
+                    if (hiddenstate == 'hidden') {
+                        // place a 'nothing' hidden PLM
+                        this.bsdiff_apromhacked.overwrite(newaddress, [0x83, 0xef]) // missile shot block PLM 0xef83
+                        this.bsdiff_apromhacked.overwrite(newaddress+4, [0x20, 0x05]) // 0x0520 hackery to avoid new PLM (see patchmain comments)
+                    } else {
+                        // place a 'nothing' visible or chozo PLM
+                        this.bsdiff_apromhacked.overwrite(newaddress, [0x2f, 0xb6]) // vanilla PLM 0xb62f
+                    }
+                } else if (apPlmId == 0) {
+                    console.log('Error: we read PLM value of 0 (should be a ROM pointer) @ AP rom offset 0x' + address.toString(16))
+                    return
+                } else if(apPlmId in ap_inferredplms) {
+                    // this appears to be a non-nothing AP item PLM we're trying to move over, so we can discard the PLM ID,
+                    // instead using whichever new AP PLM preserves the hiddenness of the original romhack item
                     this.bsdiff_apromhacked.overwrite(newaddress, [(romhack_ap_plms[hiddenstate]     ) & 0xff,
-                                                                   (romhack_ap_plms[hiddenstate] >> 8) & 0xff],
-                                                      2)
+                                                                   (romhack_ap_plms[hiddenstate] >> 8) & 0xff])
+                    // also, since this is a non-nothing item that all the AP MW item PLM code must look
+                    // up in the item location table, we must copy the correct location identifier into
+                    // the PLM's "room argument". this is what actually propagates up the vanilla item
+                    // type (such as reserve tank), as well as propagating a unique item save bit location,
+                    // to this specific item in the romhack
+                    // (this operation is not needed for very vanilla-like romhacks as they rarely
+                    //  modify location ids, along with their not modifying room PLM rom offsets)
+                    let locationidBytes = this.bsdiff_from_ap.read(this.vanillaSm, address + 4, 2)
+                    this.bsdiff_apromhacked.overwrite(newaddress + 4, locationidBytes)
+                } else {
+                    console.log('warning: failed to infer hidden-ness of romhack orig PLM 0x' + romhackOrigPlm.toString(16) + ' @ ROM file address 0x' + newaddress.toString(16) + '. copying PLM 0x' + apPlmId.toString(16) + ' directly from AP')
+                    if (ap_inferredplms['visible'] != romhack_ap_plms['visible']) {
+                        console.log('  -- additional warning: romhack ap plms differ from original ap plms, this rom is *very likely* to crash!')
+                    }
+                    this.bsdiff_apromhacked.overwrite(newaddress, plm)
                 }
-                // also, since this is a non-nothing item that all the AP MW item PLM code must look
-                // up in the item location table, we must copy the correct location identifier into
-                // the PLM's "room argument". this is what actually propagates up the vanilla item
-                // type (such as reserve tank), along with the item location save bit location, to
-                // this specific item in the romhack
-                // (this operation is not needed for very vanilla-like romhacks as they rarely
-                //  modify location ids, along with their not modifying room PLM rom offsets)
-                let locationidBytes = this.bsdiff_from_ap.read(this.vanillaSm, address + 4, 2)
-                this.bsdiff_apromhacked.overwrite(newaddress + 4, locationidBytes)
-            } else {
-                console.log('warning: failed to infer hidden-ness of romhack orig PLM 0x' + romhackOrigPlm.toString(16) + ' @ ROM file address 0x' + newaddress.toString(16) + '. copying PLM 0x' + itemcopied.toString(16) + ' directly from AP')
-                if (ap_inferredplms['visible'] != romhack_ap_plms['visible']) {
-                    console.log('  -- additional warning: romhack ap plms differ from original ap plms, this rom is *very likely* to crash!')
-                }
-                this.bsdiff_apromhacked.overwrite(newaddress, plm)
             }
         }
         // if the romhack has 110 items, we need to change 10 of them very subtly (or N-100).
