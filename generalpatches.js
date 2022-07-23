@@ -40,11 +40,16 @@ var generalpatches = {
     ],
 
     springBallCrash: [
-    // fix obscure vanilla bug where turning off spring ball while bouncing can crash in $91:EA07:
-    // overwrite unreachable code at $91:fc4a (due to pose 0x65 not existing).
-    // translate RAM $0B20 values #$0601 and #$0602 (seem spring ball related)
-    // to valid array indices #$0001 and #$0002, respectively (values expected by $91:EA07)
+    // fix obscure vanilla bug where: turning off spring ball while bouncing, can crash in $91:EA07,
+    // or exactly the same way as well in $91:F1FC:
+    // fix buffer overrun. overwrite nearby unreachable code at $91:fc4a (due to pose 0x65 not existing).
+    // translate RAM $0B20 values:
+    // #$0601 (spring ball specific value) --> #$0001
+    // #$0602 (spring ball specific value) --> #$0002
+    // thus loading a valid jump table array index in these two buggy functions
                  {address: 0x8ea07, type: 'overwrite', description:'fix spring ball crash',
+                  bytes: ['jsl', [0x91, 0xfc, 0x4a].reverse()].flat()}, // jsl $91:fc4a
+                 {address: 0x8f1fc, type: 'overwrite',
                   bytes: ['jsl', [0x91, 0xfc, 0x4a].reverse()].flat()}, // jsl $91:fc4a
                  {address: 0x8fc4a, type: 'overwrite',
                   bytes: [0xad /* lda */, [0x0B, 0x20].reverse(), // LDA $0B20: Used for bouncing as a ball when you land
