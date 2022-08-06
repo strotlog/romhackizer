@@ -281,48 +281,9 @@ class archipelagoclass {
             let data = this.bsdiff_from_ap.read(this.vanillaSm, romOffsetFromSnesAddrString(entry.old), entry.length)
             this.bsdiff_apromhacked.overwrite(romOffsetFromSnesAddrString(entry.new), data)
         }
-        // HACK: for sm_item_graphics__new table, the data may not be in the .apsm yet. add it (no harm if this overwrite is never read):
-        let smgraphicstarget = table.find((e) => e.symbol == "sm_item_graphics__new").new
-        if (this.bsdiff_apromhacked.read(this.vanillaSm, romOffsetFromSnesAddrString(smgraphicstarget), 1)[0] == 0xff /* 0xff suggests freespace */) {
-            console.log("workaround versioning issues: adding sm_item_graphics__new manually")
-            let graphics = [0x08, 0x00,
-                            0x0A, 0x00,
-                            0x0C, 0x00,
-                            0x0E, 0x00,
-                            0x2F, 0xE1,
-                            0x5D, 0xE1,
-                            0x8B, 0xE1,
-                            0xB9, 0xE1,
-                            0xE7, 0xE1,
-                            0x15, 0xE2,
-                            0x43, 0xE2,
-                            0x71, 0xE2,
-                            0xA3, 0xE2,
-                            0xD8, 0xE2,
-                            0x0D, 0xE3,
-                            0x3A, 0xE3,
-                            0x68, 0xE3,
-                            0x95, 0xE3,
-                            0xC3, 0xE3,
-                            0xF1, 0xE3,
-                            0x1F, 0xE4,
-                            0x64, 0xFF,
-                            0x6E, 0xFF,
-                            ]
-            if (this.hackname == 'rotation') {
-                // plm_graphics_entry_offworld_item, and _progression_item
-                graphics[graphics.length-4] = 0x14
-                graphics[graphics.length-3] = 0xfc
-                graphics[graphics.length-2] = 0x1e
-                graphics[graphics.length-1] = 0xfc
-                // or maybe it should be the other way around - rotation default, zfactor special, since zfactor is the one that moves plms around
-            }
-            this.bsdiff_apromhacked.overwrite(romOffsetFromSnesAddrString(smgraphicstarget),
-                                              graphics)
-        }
         let playerIdTarget = table.find((e) => e.symbol == "config_player_id").new
         let playerIdBytes = this.bsdiff_apromhacked.read(this.vanillaSm, romOffsetFromSnesAddrString(playerIdTarget), 2)
-        if (playerIdBytes[0] == 0xFF && playerIdBytes[1] == 0xFF) { // no player ID yet
+        if (playerIdBytes[0] == 0xFF && playerIdBytes[1] == 0xFF) { // AP versions pre-0.3.4 have no player ID in config, handle this case via parsing id number from title (but now that 0.3.4+ is released and running, this is essentially dead code)
             let titlebytes = this.bsdiff_apromhacked.read(this.vanillaSm, 0x7fc0, 21)
             let title = (new TextDecoder(/* default utf-8, will work */)).decode(new Uint8Array(titlebytes))
             let match = /^SM\d+_(\d+)_/.exec(title)
@@ -343,19 +304,25 @@ class archipelagoclass {
 
 romSize_Rotation = 3*1024*1024 /* 3MiB vanilla */ + 4*0x8000 // go 4 banks beyond vanilla end: 2 new banks ($E0, $E1) for vanilla-rotation, +2 new banks ($E2, $E3) for multiworld
 
-// from https://github.com/strotlog/SMBasepatch/.../rotation/multiworld.sym
+// things chosen to copy based on archipelago's worlds/sm/__init__.py: specifically, the symbols it uses to write generated AP data to the ROM
+// then values are from https://github.com/strotlog/SMBasepatch/tree/<branch>/build/rotation/sm-basepatch-symbols.json
+//  ^ TODO: auto parse jsons from githubusercontent to get the new+old (ie to+from) addresses, instead of hard coding here
 copyFromMultiWorldTo_Rotation = [
     {"symbol" : "message_item_names", "new": "85:9963", "old": "85:9963", "length": 7744, vanilla : 0xFF },
     {"symbol" : "rando_item_table", "new": "E2:E000", "old": "B8:E000", "length": 4096, vanilla: 0xFF },
-    //{"symbol" : "sm_item_graphics", "new": "84:F882", "old": "84:F882", "length": 230, vanilla: 0xFF },
-    {"symbol" : "sm_item_graphics__new", "new": "E2:8800", "old": "B8:8800", "length": 46, vanilla: 0xFF },
-    {"symbol" : "offworld_graphics", "new": "89:9100", "old": "89:9100", "length": 512, vanilla: 0x00 },
+    {"symbol" : "offworld_graphics_data_progression_item", "new": "89:9100", "old": "89:9100", "length": 256, vanilla: 0x00 },
+    {"symbol" : "offworld_graphics_data_item", "new": "89:9200", "old": "89:9200", "length": 256, vanilla: 0x00 },
+    {"symbol" : "prog_item_eight_palette_indices", "new": "84:F87E", "old": "84:F87E", "length": 8, vanilla: 0xFF },
+    {"symbol" : "nonprog_item_eight_palette_indices", "new": "84:F888", "old": "84:F888", "length": 8, vanilla: 0xFF },
     {"symbol" : "config_deathlink", "new": "CE:FF04", "old": "CE:FF04", "length": 1, vanilla: 0xFF },
     {"symbol" : "config_remote_items", "new": "CE:FF06", "old": "CE:FF06", "length": 1, vanilla: 0xFF },
     {"symbol" : "config_player_id", "new": "CE:FF08", "old": "CE:FF08", "length": 2, vanilla: [0xFF, 0xFF] },
-    {"symbol" : "rando_player_table", "new": "E2:D000", "old": "B8:D000", "length": 2048, vanilla: 0xFF },
-    {"symbol" : "rando_player_id_table", "new": "E2:D800", "old": "B8:D800", "length": 400, vanilla: 0xFF },
-    {"symbol" : "snes_header_game_title", "new": "80:FFC0", "old": "80:FFC0", "length": 21, vanilla: 'Super Metroid'.padEnd(21, ' ')}
+    {"symbol" : "rando_player_table", "new": "E2:D000", "old": "B8:D000", "length": 3216, vanilla: 0xFF },
+    {"symbol" : "rando_player_id_table", "new": "E2:DC90", "old": "B8:DC90", "length": 402, vanilla: 0xFF },
+    {"symbol" : "snes_header_game_title", "new": "80:FFC0", "old": "80:FFC0", "length": 21, vanilla: 'Super Metroid'.padEnd(21, ' ')},
+    {"symbol" : "start_item_data_major", "new": "E2:C800", "old": "B8:C800", "length": 8, vanilla: 0xFF },
+    {"symbol" : "start_item_data_minor", "new": "E2:C808", "old": "B8:C808", "length": 16, vanilla: 0xFF },
+    {"symbol" : "start_item_data_reserve", "new": "E2:C818", "old": "B8:C818", "length": 4, vanilla: 0xFF },
 ]
 
 romSize_Zfactor = 3*1024*1024 /* 3MiB vanilla */ + 7*0x8000
@@ -363,14 +330,19 @@ romSize_Zfactor = 3*1024*1024 /* 3MiB vanilla */ + 7*0x8000
 copyFromMultiWorldTo_Zfactor = [
     {"symbol" : "message_item_names", "new": "85:9963", "old": "85:9963", "length": 7744, vanilla : 0xFF },
     {"symbol" : "rando_item_table", "new": "E5:E000", "old": "B8:E000", "length": 4096, vanilla: 0xFF },
-    {"symbol" : "sm_item_graphics__new", "new": "E5:8800", "old": "B8:8800", "length": 46, vanilla: 0xFF },
-    {"symbol" : "offworld_graphics", "new": "89:9100", "old": "89:9100", "length": 512, vanilla: 0x00 },
+    {"symbol" : "offworld_graphics_data_progression_item", "new": "89:9100", "old": "89:9100", "length": 256, vanilla: 0x00 },
+    {"symbol" : "offworld_graphics_data_item", "new": "89:9200", "old": "89:9200", "length": 256, vanilla: 0x00 },
+    {"symbol" : "prog_item_eight_palette_indices", "new": "84:FBCE", "old": "84:F87E", "length": 8, vanilla: 0xFF },
+    {"symbol" : "nonprog_item_eight_palette_indices", "new": "84:FBD8", "old": "84:F888", "length": 8, vanilla: 0xFF },
     {"symbol" : "config_deathlink", "new": "CE:FF04", "old": "CE:FF04", "length": 1, vanilla: 0xFF },
     {"symbol" : "config_remote_items", "new": "CE:FF06", "old": "CE:FF06", "length": 1, vanilla: 0xFF },
     {"symbol" : "config_player_id", "new": "CE:FF08", "old": "CE:FF08", "length": 2, vanilla: [0xFF, 0xFF] },
-    {"symbol" : "rando_player_table", "new": "E5:D000", "old": "B8:D000", "length": 2048, vanilla: 0xFF },
-    {"symbol" : "rando_player_id_table", "new": "E5:D800", "old": "B8:D800", "length": 400, vanilla: 0xFF },
-    {"symbol" : "snes_header_game_title", "new": "80:FFC0", "old": "80:FFC0", "length": 21, vanilla: 'Super Metroid'.padEnd(21, ' ')}
+    {"symbol" : "rando_player_table", "new": "E5:D000", "old": "B8:D000", "length": 3216, vanilla: 0xFF },
+    {"symbol" : "rando_player_id_table", "new": "E5:DC90", "old": "B8:DC90", "length": 402, vanilla: 0xFF },
+    {"symbol" : "snes_header_game_title", "new": "80:FFC0", "old": "80:FFC0", "length": 21, vanilla: 'Super Metroid'.padEnd(21, ' ')},
+    {"symbol" : "start_item_data_major", "new": "E5:C800", "old": "B8:C800", "length": 8, vanilla: 0xFF },
+    {"symbol" : "start_item_data_minor", "new": "E5:C808", "old": "B8:C808", "length": 16, vanilla: 0xFF },
+    {"symbol" : "start_item_data_reserve", "new": "E5:C818", "old": "B8:C818", "length": 4, vanilla: 0xFF },
 ]
 
 visiblePlm_Zfactor =

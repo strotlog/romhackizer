@@ -317,7 +317,7 @@ async function archipelagoRidiculum_continued(hackname, compressjs, jsyaml, arch
     let jsy = jsyaml
     let archi = archipelago
     g_archi = archipelago
-    let basepatch_ips = await fetchFileAndGetBytes("https://raw.githubusercontent.com/strotlog/SMBasepatch/zfactor/build/romhacks/" + hackname + "/multiworld-basepatch.ips")
+    let basepatch_ips = await fetchFileAndGetBytes("https://raw.githubusercontent.com/strotlog/SMBasepatch/main/build/romhacks/" + hackname + "/multiworld-basepatch.ips")
     console.log('fetched basepatch ips')
     let basepatch = readips(basepatch_ips, 'basepatch ips')
     if (basepatch.length == 0) {
