@@ -59,6 +59,45 @@ var generalpatches = {
                           ].flat()}
     ],
 
+    linkedSupersCrash: [
+    // fix vanilla crash bug that seems to come into play in rotation when lining up the 2 metal space pirates together and supering them a bunch
+                 // part 1: wrap call from $90:BE45 (projectile reflection) -> $90:ADB7 (clear projectile)
+                 {address: 0x83e45, type: 'overwrite', description:'fix linked supers crash on metal pirates',
+                  bytes: ['jsl', [0x90, 0xf7, 0x00].reverse(), // jsl to new function $90:f700
+                          'bra', 0x02,
+                          'nop', 'nop'
+                          ].flat()},
+                 {address: 0x87700, type: 'freespace',
+                  bytes: [ // perform link bit check and bounds checking on just-loaded $0c7c,x
+                          0x89 /* bit imm */, [0xff, 0x00].reverse(), // bit #$ff00
+                          'beq', 0xd, // no link bit? leave
+                          0x29 /* and imm */, [0x00, 0xff].reverse(), // and #$00ff
+                          0xc9 /* cmp imm */, [0x00, 0x09].reverse(), // cmp #$0009
+                          'bpl', 0x5, // last valid byte offset into projectile arrays is 8, if beyond this just return
+                          'tax',
+                          'jsl', [0x90, 0xad, 0xb7].reverse(), // jsl $90:ADB7: Clear projectile X
+                          'rtl'
+                          ].flat()},
+                 // part 2: wrap call from $90:B324 -> $90:BF46 (initialize new linked super)
+                 {address: 0x83324, type: 'overwrite',
+                  bytes: [0x20 /* jsr */, [0xf7, 0x20].reverse() // jsr to new function $90:f720. (not enough room between branches to conveniently jsl)
+                          ].flat()},
+                 {address: 0x87720, type: 'freespace',
+                  bytes: [0x20 /* jsr */, [0xbf, 0x46].reverse(),
+                          0xe0 /* cpx imm */, [0x0, 0xa].reverse(),
+                          'bne', 0x6, // return if X != #$000A
+                          // X==#$000A after running $90:BF46, this is not a valid index and, though it's a somewhat of
+                          // an inference, it should only mean that all 5 projectile slots were full.
+                          // the linked super therefore failed to spawn.
+                          // so $0c7c,X has bit #$0100 set but points to a completely invalid linked super projectile
+                          // index in the low byte.
+                          // get rid of the link!
+                          0xa2, /* ldx */ [0x0d, 0xde].reverse(), // LDX $0DDE: Projectile index (byte offset)
+                          0x9e /* stz relative */, [0xc, 0x7c].reverse(), // STZ $0c7c,x
+                          'rts'
+                          ].flat()}
+    ],
+
     all: function() {
         patches = []
         patches.push(...generalpatches.fixMorphPickupBug)
@@ -66,6 +105,7 @@ var generalpatches = {
         patches.push(...generalpatches.screwAttackMenu)
         patches.push(...generalpatches.blueDuringHeat)
         patches.push(...generalpatches.springBallCrash)
+        patches.push(...generalpatches.linkedSupersCrash)
         return patches
     },
 
