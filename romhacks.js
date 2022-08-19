@@ -141,7 +141,7 @@ var romhacks = {
                         newitem = itemid
                     }
                     itempatches.push({address: address, type: 'overwrite',
-                                      bytes: [(itemid & 0xff), (itemid >> 8) & 0xff]})
+                                      bytes: [(newitem & 0xff), (newitem >> 8) & 0xff]})
                     // check for race mode
                     if (itemid === 0xef03 || itemid === 0xef57 || itemid === 0xefab) {
                         springballcount++
@@ -610,6 +610,149 @@ var romhacks = {
     },
     // end rotation
 
+    otherRotation: {
+
+        sm_to_otherRotation_remapping: {
+            // otherRotation moves the ROM location of 5 plm populations/instance definitions, vs those listed in offsetsInRomOf100ItemPlms:
+            // case sensitive--must use lowercase so that lookups work!
+            '0x78404' : '0x7eb56', // bombs plm vanilla -> otherRotation
+            '0x7c2e9' : '0x7ecd8', // ws reserve
+            '0x7c2ef' : '0x7ecde', // ws reserve missile
+            '0x7c603' : '0x7ee16', // aqueduct missile
+            '0x7c609' : '0x7ee1c', // aqueduct super
+        },
+
+        patchmain: function ({hasRoms = true, loadedroms = {}} = {}) {
+
+            let itempatches = []
+
+            if (hasRoms) {
+                let springballcount = 0
+
+                for (address of romhacks.offsetsInRomOf100ItemPlms) {
+                    let fromAddress = address
+                    let toAddress
+                    if (('0x' + fromAddress.toString(16)) in romhacks.otherRotation.sm_to_otherRotation_remapping) {
+                        toAddress = parseInt(romhacks.otherRotation.sm_to_otherRotation_remapping['0x' + fromAddress.toString(16)])
+                    } else {
+                        toAddress = fromAddress
+                    }
+                    // get the item!
+                    let itemid = loadedroms['rando'].allbytes[fromAddress] + loadedroms['rando'].allbytes[fromAddress+1]*256 // convert plm from little endian
+                    let newitem
+
+                    // check for both types of 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
+                    if (itemid === 0xbae9) {
+                        // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same)
+                        // because the varia 'nothing item plm' types do not exist in sm romhacks, we have to instead use plm id 0xb62f "Don't make PLM". it's perfectly equivalent anyway!
+                        newitem = 0xb62f
+                    } else if (itemid === 0xbaed) {
+                        // hidden 'nothing', see comments on 0xbaed from rotation, this is a bit hacky
+                        newitem = 0xef83
+                        itempatches.push({address: toAddress+4, type: 'overwrite',
+                                          bytes: [0x05, 0x20].reverse()})
+                    } else {
+                        newitem = itemid
+                    }
+                    itempatches.push({address: toAddress, type: 'overwrite',
+                                      bytes: [(newitem & 0xff), (newitem >> 8) & 0xff]})
+                    // check for race mode
+                    if (itemid === 0xef03 || itemid === 0xef57 || itemid === 0xefab) {
+                        springballcount++
+                    }
+                    if (springballcount > 5) {
+                        console.log('Error: Cannot read items from a Race-Mode protected rando ROM!!')
+                        return []
+                    }
+                }
+            }
+
+            let patches = []
+
+            if (itempatches.length != 0) {
+                itempatches[0].description = 'copying items from rando rom'
+                patches.push(...itempatches)
+            }
+
+            // items are done. now do a select few code patches that make things suck less!
+            patches.push(...generalpatches.all()) // requires that html has loaded generalpatches.js
+
+            patches.push(...romfeatures.maxAmmoDisplay) // requires that html has loaded romfeatures.js
+            patches.push(...romfeatures.suitPickupsNowPreserveSamusLocation)
+
+            // otherRotation-specific code patches
+            patches.push(...romhacks.otherRotation.allpatches())
+
+            return patches
+        },
+
+        startOnZebesAndOpenSoftlockDoors: [ // start on zebes is aka skip ceres (incl. skip intro. no credits in intro)
+            {address: 0x16eda, type: 'overwrite', description: 'otherRotation start on zebes and open softlock doors',
+             bytes: [0x1f]},
+            // above is not sufficient for otherRotation, as that hack overwrites the corrupt-save detection in vanilla $81:8085 Load from SRAM
+            // main menu loads existing slot 1 such that when you start a blank slot 2 with the skipped corruption detection, it inherits slot 1's load station
+            // so, we intervene here in the same place, where we're already diverting away from the intro
+            {address: 0x16edf, type: 'overwrite',
+             bytes: ['jsl', [0x82, 0xfa, 0x10].reverse(), // jsl $82:fa10
+                     'nop', 'nop'].flat()},
+            // new code at $82:fa10:
+            {address: 0x17a10, type: 'freespace',
+             bytes: [0xa9 /* lda imm */, [0x00, 0x00].reverse(), // LDA #$0000
+                     0x8f /* sta.l */, [0x7e, 0x07, 0x9f].reverse(), // [$079F] Area index = 0 (Crateria)
+                     0x8f /* sta.l */, [0x7e, 0x07, 0x8b].reverse(), // [$078B] Load station index = 0 (means Samus's ship aka landing site, when area=Crateria. list @ $80:C4C5)
+                     0xa9 /* lda imm */, [0x00, 0x05].reverse(), // LDA #$0005
+                     0x8f /* sta.l */, [0x7e, 0xd9, 0x14].reverse(), // [$D914] Loading game state = 5 (main). prevents us thinking this should be intro on next game load. normally set by landing sequence which we skip.
+
+                     // open softlock doors: (including this here since we have a good hook already, namely new game; otherwise unrelated):
+                     // top of red tower softlock prevention
+                     0xaf /* lda.l */, [0x7e, 0xd8, 0xb2].reverse(),
+                     0x09 /* ora imm */, [0x00, 0x01].reverse(), // open (turn blue) the 0x10th (0n16th) door bit by setting to 1 (red brin ele -> crat door)
+                     0x8f /* sta.l */, [0x7e, 0xd8, 0xb2].reverse(),
+
+                     // save game
+                     0xaf /* lda.l */, [0x7e, 0x09, 0x52].reverse(), // must load [$0952] Save slot selected to A for call
+                     'jsl', [0x81, 0x80, 0x00].reverse(), // call $81:8000 Save to SRAM
+
+                     // restore overwritten instructions
+                     0xa9 /* lda imm */, [0xa3, 0x95].reverse(), // LDA #$A395
+                     0x8f /* sta.l */, [0x7e, 0x1f, 0x51].reverse(), // STA $7e1f51
+                     'rtl'
+                     ].flat()},
+        ],
+
+        shipLoadCameraPosition: [
+            // edit 'samus's ship' save station position info (first entry in $80:c4c5)
+            {address: 0x44cb, type: 'overwrite', description: 'otherRotation adjust camera for landing site load',
+             bytes: [[0x03, 0xe0].reverse(), // camera X = 3 7/8 screens
+                     [0x03, 0xe0].reverse(), // camera Y = 3 7/8 screens
+                     [0x00, 0x51].reverse(), // samus on-screen Y = 0x51 (fits camera adjustment)
+                     [0xff, 0xf0].reverse(), // samus on-screen X = -0x10 to center (fits camera adjustment)
+                     ].flat()},
+            // $80:C437 Load from load station, in vanilla is willing to write non-multiples of 256 to
+            // $091d BG1 X offset and $091f BG1 Y offset. such non-multiples completely screw up door animations,
+            // shot block animations, and item PLM animations. turns out 0 seems perfectly safe rather than
+            // calculating a nearby multiple of 256!
+            {address: 0x4473, type: 'overwrite',
+             bytes: [0x9c /* stz */, [0x09, 0x1d].reverse()
+                     ].flat()},
+            {address: 0x447c, type: 'overwrite',
+             bytes: [0x9c /* stz */, [0x09, 0x1f].reverse()
+                     ].flat()},
+        ],
+
+        allpatches: function() {
+            let patches = []
+            // copy some of our work from sm rotation
+            patches.push(...romhacks.rotation.zebesAwakeningPatch)
+            patches.push(...romhacks.rotation.bombTorizoPatch)
+            // the otherRotation-specific patches:
+            patches.push(...romhacks.otherRotation.startOnZebesAndOpenSoftlockDoors)
+            patches.push(...romhacks.otherRotation.shipLoadCameraPosition)
+            return patches
+        },
+    },
+    // end otherRotation
+
     zfactor: {
         sm_to_zf_mapping: {
         // mapping contributed by ironrusty:
@@ -721,6 +864,7 @@ var romhacks = {
         zf_unmodified_except_sram_bit: [ // cover 113 locations (100+these 13 which will appear as vanilla romhack.. except we modify the last 3's identity. first 10 of these are 7 missiles, 2 super packs, and 1 e tank)
             '0x7C9BF', '0x7CC2D', '0x7CC95', '0x7D2C1', '0x7D13B', '0x7D133', '0x7D087', '0x7DA1B', '0x7DAD9', '0x7DB51', '0x7d7e9', '0x7d7ef', '0x7d7f5',
         ],
+
         patchmain: function ({hasRoms = true, loadedroms = {}} = {}) {
 
             let itempatches = []
@@ -734,7 +878,7 @@ var romhacks = {
                     // check for both types of 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
                     if (itemid === 0xbae9) {
                         // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same)
-                        // because the varia 'nothing item plm' types do not exist in sm rotation, we have to instead use plm id 0xb62f "Don't make PLM". it's perfectly equivalent anyway!
+                        // because the varia 'nothing item plm' types do not exist in sm romhacks, we have to instead use plm id 0xb62f "Don't make PLM". it's perfectly equivalent anyway!
                         newitem = 0xb62f
                     } else if (itemid === 0xbaed) {
                         // hidden 'nothing', see comments on 0xbaed from rotation, this is a bit hacky
@@ -745,7 +889,7 @@ var romhacks = {
                         newitem = itemid
                     }
                     itempatches.push({address: parseInt(romhacks.zfactor.sm_to_zf_mapping[fromAddressString]), type: 'overwrite',
-                                      bytes: [(itemid & 0xff), (itemid >> 8) & 0xff]})
+                                      bytes: [(newitem & 0xff), (newitem >> 8) & 0xff]})
                     // check for race mode
                     if (itemid === 0xef03 || itemid === 0xef57 || itemid === 0xefab) {
                         springballcount++
@@ -778,4 +922,5 @@ var romhacks = {
             return patches
         },
     },
+    //end zfactor
 }

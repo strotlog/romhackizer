@@ -17,8 +17,9 @@ define(['require', 'compressjs/main.min', 'js-yaml/js-yaml.min'],
                                    vanillaSm,
                                    offsetsInRomOf100ItemPlms,
                                    hackname,
+                                   itemRemapping,
                                    itemMapping) {
-            ap = new archipelagoclass(apsm, modifications, vanillaSm, offsetsInRomOf100ItemPlms, hackname, itemMapping)
+            ap = new archipelagoclass(apsm, modifications, vanillaSm, offsetsInRomOf100ItemPlms, hackname, itemRemapping, itemMapping)
             this.ap = ap
             ap.extractApsmData()
             ap.expandRom()
@@ -36,6 +37,7 @@ class archipelagoclass {
                 vanillaSm,
                 offsetsInRomOf100ItemPlms,
                 hackname,
+                itemRemapping,
                 itemMapping) {
 
         this.apsm = apsm
@@ -43,6 +45,7 @@ class archipelagoclass {
         this.vanillaSm = vanillaSm
         this.offsetsInRomOf100ItemPlms = offsetsInRomOf100ItemPlms
         this.hackname = hackname
+        this.itemRemapping = itemRemapping
         this.itemMapping = itemMapping
         this.name = 'archipelago'
         this.zip = new zipfile0(this.apsm, "delta.bsdiff4")
@@ -59,6 +62,8 @@ class archipelagoclass {
     expandRom() {
         if (this.hackname == 'rotation') {
             this.bsdiff_apromhacked.expandtosize(romSize_Rotation, 0xff)
+        } else if (this.hackname == 'otherRotation') {
+            this.bsdiff_apromhacked.expandtosize(romSize_otherRotation, 0xff)
         } else if (this.hackname == 'zfactor') {
             this.bsdiff_apromhacked.expandtosize(romSize_Zfactor, 0xff)
         } else {
@@ -153,18 +158,21 @@ class archipelagoclass {
             let apPlmIdBytes = this.bsdiff_from_ap.read(this.vanillaSm /* basis of the bsdiff */, address, 2) // read from AP
             let apPlmId = apPlmIdBytes[0] + apPlmIdBytes[1]*256
             if (this.itemMapping == null) {
-                newaddress = address // all item locations are the same
+                let newaddress = address // all item locations are the same
+                if (this.itemRemapping != null && ('0x' + address.toString(16)) in this.itemRemapping) { // ... except if they're not (5 known instances ever)
+                    newaddress = parseInt(this.itemRemapping['0x' + address.toString(16)])
+                }
                 // see patchmain in other file for comments detailing PLM codes
                 if (apPlmId == 0xbae9) {
                     // 'nothing' chozo or 'nothing' in the open PLM (convert varia plm 0xbae9 -> vanilla plm 0xb62f)
-                    this.bsdiff_apromhacked.overwrite(address, [0x2f, 0xb6])
+                    this.bsdiff_apromhacked.overwrite(newaddress, [0x2f, 0xb6])
                 } else if (apPlmId == 0xbaed) {
                     // 'nothing' hidden PLM (convert varia plm 0xbaed -> hackery achieving the same thing)
-                    this.bsdiff_apromhacked.overwrite(address, [0x83, 0xef]) // missile shot block PLM 0xef83
-                    this.bsdiff_apromhacked.overwrite(address+4, [0x20, 0x05]) // 0x0520 hackery to avoid new PLM (see patchmain comments)
+                    this.bsdiff_apromhacked.overwrite(newaddress, [0x83, 0xef]) // missile shot block PLM 0xef83
+                    this.bsdiff_apromhacked.overwrite(newaddress+4, [0x20, 0x05]) // 0x0520 hackery to avoid new PLM (see patchmain comments)
                 } else {
                     // main overwrite!
-                    this.bsdiff_apromhacked.overwrite(newaddress, plm)
+                    this.bsdiff_apromhacked.overwrite(newaddress, apPlmIdBytes)
                 }
             } else {
                 // convert vanilla item locations to romhack item locations
@@ -248,6 +256,8 @@ class archipelagoclass {
         let table = null
         if (this.hackname == 'rotation') {
             table = copyFromMultiWorldTo_Rotation
+        } else if (this.hackname == 'otherRotation') {
+            table = copyFromMultiWorldTo_otherRotation
         } else if (this.hackname == 'zfactor') {
             table = copyFromMultiWorldTo_Zfactor
         } else {
@@ -324,6 +334,10 @@ copyFromMultiWorldTo_Rotation = [
     {"symbol" : "start_item_data_minor", "new": "E2:C808", "old": "B8:C808", "length": 16, vanilla: 0xFF },
     {"symbol" : "start_item_data_reserve", "new": "E2:C818", "old": "B8:C818", "length": 4, vanilla: 0xFF },
 ]
+
+romSize_otherRotation = 4*1024*1024 // 4MiB just for the romhack, no further expansion needed as free banks are included
+
+copyFromMultiWorldTo_otherRotation = copyFromMultiWorldTo_Rotation // otherRotation can use the same multiworld basepatch as rotation, mainly in bank $e2, which is free
 
 romSize_Zfactor = 3*1024*1024 /* 3MiB vanilla */ + 7*0x8000
 

@@ -61,13 +61,14 @@ var generalpatches = {
 
     linkedSupersCrash: [
     // fix vanilla crash bug that seems to come into play in rotation when lining up the 2 metal space pirates together and supering them a bunch
+    // this patch is actually included in otherRotation 1.0 (thanks BuggMann!). to avoid angering the freespace detector we write this version a little later (otherRotation: $90:f700, here: $90:f730)
                  // part 1: wrap call from $90:BE45 (projectile reflection) -> $90:ADB7 (clear projectile)
                  {address: 0x83e45, type: 'overwrite', description:'fix linked supers crash on metal pirates',
-                  bytes: ['jsl', [0x90, 0xf7, 0x00].reverse(), // jsl to new function $90:f700
+                  bytes: ['jsl', [0x90, 0xf7, 0x30].reverse(), // jsl to new function $90:f730
                           'bra', 0x02,
                           'nop', 'nop'
                           ].flat()},
-                 {address: 0x87700, type: 'freespace',
+                 {address: 0x87730, type: 'freespace',
                   bytes: [ // perform link bit check and bounds checking on just-loaded $0c7c,x
                           0x89 /* bit imm */, [0xff, 0x00].reverse(), // bit #$ff00
                           'beq', 0xd, // no link bit? leave
@@ -80,9 +81,9 @@ var generalpatches = {
                           ].flat()},
                  // part 2: wrap call from $90:B324 -> $90:BF46 (initialize new linked super)
                  {address: 0x83324, type: 'overwrite',
-                  bytes: [0x20 /* jsr */, [0xf7, 0x20].reverse() // jsr to new function $90:f720. (not enough room between branches to conveniently jsl)
+                  bytes: [0x20 /* jsr */, [0xf7, 0x50].reverse() // jsr to new function $90:f750. (not enough room between branches to conveniently jsl)
                           ].flat()},
-                 {address: 0x87720, type: 'freespace',
+                 {address: 0x87750, type: 'freespace',
                   bytes: [0x20 /* jsr */, [0xbf, 0x46].reverse(),
                           0xe0 /* cpx imm */, [0x0, 0xa].reverse(),
                           'bne', 0x6, // return if X != #$000A
