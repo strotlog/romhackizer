@@ -322,13 +322,13 @@ copyFromMultiWorldTo_Rotation = [
     {"symbol" : "rando_item_table", "new": "E2:E000", "old": "B8:E000", "length": 4096, vanilla: 0xFF },
     {"symbol" : "offworld_graphics_data_progression_item", "new": "89:9100", "old": "89:9100", "length": 256, vanilla: 0x00 },
     {"symbol" : "offworld_graphics_data_item", "new": "89:9200", "old": "89:9200", "length": 256, vanilla: 0x00 },
-    {"symbol" : "prog_item_eight_palette_indices", "new": "84:F87E", "old": "84:F87E", "length": 8, vanilla: 0xFF },
-    {"symbol" : "nonprog_item_eight_palette_indices", "new": "84:F888", "old": "84:F888", "length": 8, vanilla: 0xFF },
+    {"symbol" : "prog_item_eight_palette_indices", "new": "84:F87E", "old": "84:FC2E", "length": 8, vanilla: 0xFF },
+    {"symbol" : "nonprog_item_eight_palette_indices", "new": "84:F888", "old": "84:FC38", "length": 8, vanilla: 0xFF },
     {"symbol" : "config_deathlink", "new": "CE:FF04", "old": "CE:FF04", "length": 1, vanilla: 0xFF },
     {"symbol" : "config_remote_items", "new": "CE:FF06", "old": "CE:FF06", "length": 1, vanilla: 0xFF },
     {"symbol" : "config_player_id", "new": "CE:FF08", "old": "CE:FF08", "length": 2, vanilla: [0xFF, 0xFF] },
-    {"symbol" : "rando_player_table", "new": "E2:D000", "old": "B8:D000", "length": 3216, vanilla: 0xFF },
-    {"symbol" : "rando_player_id_table", "new": "E2:DC90", "old": "B8:DC90", "length": 402, vanilla: 0xFF },
+    {"symbol" : "rando_player_name_table", "new": "E2:D000", "old": "B8:D000", "length": 3216, vanilla: 0xFF },
+    {"symbol" : "rando_player_id_table", "new": "E2:DCA0", "old": "B8:DCA0", "length": 402, vanilla: 0xFF },
     {"symbol" : "snes_header_game_title", "new": "80:FFC0", "old": "80:FFC0", "length": 21, vanilla: 'Super Metroid'.padEnd(21, ' ')},
     {"symbol" : "start_item_data_major", "new": "E2:C800", "old": "B8:C800", "length": 8, vanilla: 0xFF },
     {"symbol" : "start_item_data_minor", "new": "E2:C808", "old": "B8:C808", "length": 16, vanilla: 0xFF },
@@ -346,13 +346,13 @@ copyFromMultiWorldTo_Zfactor = [
     {"symbol" : "rando_item_table", "new": "E5:E000", "old": "B8:E000", "length": 4096, vanilla: 0xFF },
     {"symbol" : "offworld_graphics_data_progression_item", "new": "89:9100", "old": "89:9100", "length": 256, vanilla: 0x00 },
     {"symbol" : "offworld_graphics_data_item", "new": "89:9200", "old": "89:9200", "length": 256, vanilla: 0x00 },
-    {"symbol" : "prog_item_eight_palette_indices", "new": "84:FBCE", "old": "84:F87E", "length": 8, vanilla: 0xFF },
-    {"symbol" : "nonprog_item_eight_palette_indices", "new": "84:FBD8", "old": "84:F888", "length": 8, vanilla: 0xFF },
+    {"symbol" : "prog_item_eight_palette_indices", "new": "84:FBCE", "old": "84:FC2E", "length": 8, vanilla: 0xFF },
+    {"symbol" : "nonprog_item_eight_palette_indices", "new": "84:FBD8", "old": "84:FC38", "length": 8, vanilla: 0xFF },
     {"symbol" : "config_deathlink", "new": "CE:FF04", "old": "CE:FF04", "length": 1, vanilla: 0xFF },
     {"symbol" : "config_remote_items", "new": "CE:FF06", "old": "CE:FF06", "length": 1, vanilla: 0xFF },
     {"symbol" : "config_player_id", "new": "CE:FF08", "old": "CE:FF08", "length": 2, vanilla: [0xFF, 0xFF] },
-    {"symbol" : "rando_player_table", "new": "E5:D000", "old": "B8:D000", "length": 3216, vanilla: 0xFF },
-    {"symbol" : "rando_player_id_table", "new": "E5:DC90", "old": "B8:DC90", "length": 402, vanilla: 0xFF },
+    {"symbol" : "rando_player_name_table", "new": "E5:D000", "old": "B8:D000", "length": 3216, vanilla: 0xFF },
+    {"symbol" : "rando_player_id_table", "new": "E5:DCA0", "old": "B8:DCA0", "length": 402, vanilla: 0xFF },
     {"symbol" : "snes_header_game_title", "new": "80:FFC0", "old": "80:FFC0", "length": 21, vanilla: 'Super Metroid'.padEnd(21, ' ')},
     {"symbol" : "start_item_data_major", "new": "E5:C800", "old": "B8:C800", "length": 8, vanilla: 0xFF },
     {"symbol" : "start_item_data_minor", "new": "E5:C808", "old": "B8:C808", "length": 16, vanilla: 0xFF },
@@ -525,7 +525,7 @@ function crc32(data) {
 
     let crc = -1
     for (let i = 0; i < data.length; i++) {
-        crc = g_crctable[(data[i] ^ crc) & 0xff] ^ [crc >>> 8]
+        crc = g_crctable[(data[i] ^ crc) & 0xff] ^ (crc >>> 8)
     }
     return (-1 ^ crc) >>> 0 // >>> 0: convert to unsigned 32-bit
 }
