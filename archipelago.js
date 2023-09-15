@@ -172,7 +172,16 @@ class archipelagoclass {
                     this.bsdiff_apromhacked.overwrite(newaddress+4, [0x20, 0x05]) // 0x0520 hackery to avoid new PLM (see patchmain comments)
                 } else {
                     // main overwrite!
-                    this.bsdiff_apromhacked.overwrite(newaddress, apPlmIdBytes)
+                    let romhackPlmId
+                    if (this.hackname == 'rotation') {
+                        romhackPlmId = apPlmId + visiblePlmDifference_Rotation
+                    } else if (this.hackname == 'otherRotation') {
+                        romhackPlmId = apPlmId + visiblePlmDifference_otherRotation
+                    } else {
+                        console.log('Error: don\'t have a vanilla->romhack plm id translation for hackname \'' + this.hackname + '\'')
+                        return
+                    }
+                    this.bsdiff_apromhacked.overwrite(newaddress, [romhackPlmId % 256, Math.floor(romhackPlmId / 256)])
                 }
             } else {
                 // convert vanilla item locations to romhack item locations
@@ -361,6 +370,10 @@ copyFromMultiWorldTo_Zfactor = [
 
 visiblePlm_Zfactor =
     { "symbol" : "archipelago_visible_item_plm", "new": "84:FBC0" }
+
+// last symbol thing, again could be improved by reading json symbol data
+visiblePlmDifference_Rotation = 0x84f870 - 0x84fc20 // ap rotation plm id minus ap vanilla plm id "84:f870" - "84:fc20"
+visiblePlmDifference_otherRotation = visiblePlmDifference_Rotation
 
 // end data region
 
