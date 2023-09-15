@@ -26,6 +26,7 @@ define(['require', 'compressjs/main.min', 'js-yaml/js-yaml.min'],
             ap.applyModifications()
             ap.copy100PlmsAndNothings()
             ap.copyLimitedApsmData()
+            ap.writeMessageBoxesIfNeeded()
             return ap.copyRandoToZip()
         },
     }
@@ -64,6 +65,8 @@ class archipelagoclass {
             this.bsdiff_apromhacked.expandtosize(romSize_Rotation, 0xff)
         } else if (this.hackname == 'otherRotation') {
             this.bsdiff_apromhacked.expandtosize(romSize_otherRotation, 0xff)
+        } else if (this.hackname == 'unhundo') {
+            this.bsdiff_apromhacked.expandtosize(romSize_Unhundo, 0xff)
         } else if (this.hackname == 'zfactor') {
             this.bsdiff_apromhacked.expandtosize(romSize_Zfactor, 0xff)
         } else {
@@ -177,6 +180,8 @@ class archipelagoclass {
                         romhackPlmId = apPlmId + visiblePlmDifference_Rotation
                     } else if (this.hackname == 'otherRotation') {
                         romhackPlmId = apPlmId + visiblePlmDifference_otherRotation
+                    } else if (this.hackname == 'unhundo') {
+                        romhackPlmId = apPlmId + visiblePlmDifference_Unhundo
                     } else {
                         console.log('Error: don\'t have a vanilla->romhack plm id translation for hackname \'' + this.hackname + '\'')
                         return
@@ -267,6 +272,8 @@ class archipelagoclass {
             table = copyFromMultiWorldTo_Rotation
         } else if (this.hackname == 'otherRotation') {
             table = copyFromMultiWorldTo_otherRotation
+        } else if (this.hackname == 'unhundo') {
+            table = copyFromMultiWorldTo_Unhundo
         } else if (this.hackname == 'zfactor') {
             table = copyFromMultiWorldTo_Zfactor
         } else {
@@ -313,6 +320,46 @@ class archipelagoclass {
         }
     }
 
+    writeMessageBoxesIfNeeded() {
+        // must happen after data (incl message boxes) is copied from the .apsm, not before
+
+        if (this.hackname == 'unhundo') {
+
+            let topline = "YOUR"
+            let midline = "GOT REMOVED BY" // avoiding 'was/were' since the item name could be singular or plural
+            let toplinestart = romOffsetFromSnesAddrString(unhundo_item_received_start)
+            let midlinestart = romOffsetFromSnesAddrString(unhundo_item_received_start) + 2*2*32
+    
+            // centering
+            // use (at most) the middle 24 characters out of 32. thus, start 4 characters in
+            toplinestart += 4*2
+            midlinestart += 4*2
+            if (topline.length%2 == 1) {
+                topline = ' ' + topline
+            }
+            if (midline.length%2 == 1) {
+                midline = ' ' + midline
+            }
+            while(topline.length < 24) {
+                topline = ' ' + topline + ' '
+            }
+            while (midline.length < 24) {
+                midline = ' ' + midline + ' '
+            }
+            let topbytes = []
+            let midbytes = []
+            for (i = 0; i < 24; i++) {
+                topbytes.push(aplettering[topline[i]] % 256)
+                topbytes.push(Math.floor(aplettering[topline[i]] / 256))
+                midbytes.push(aplettering[midline[i]] % 256)
+                midbytes.push(Math.floor(aplettering[midline[i]] / 256))
+            }
+            this.bsdiff_apromhacked.overwrite(toplinestart, topbytes)
+            this.bsdiff_apromhacked.overwrite(midlinestart, midbytes)
+        }
+    }
+
+
     copyRandoToZip() {
         return this.zip.replacefile(this.bsdiff_apromhacked.repack())
     }
@@ -344,9 +391,16 @@ copyFromMultiWorldTo_Rotation = [
     {"symbol" : "start_item_data_reserve", "new": "E2:C818", "old": "B8:C818", "length": 4, vanilla: 0xFF },
 ]
 
+
 romSize_otherRotation = 4*1024*1024 // 4MiB just for the romhack, no further expansion needed as free banks are included
 
 copyFromMultiWorldTo_otherRotation = copyFromMultiWorldTo_Rotation // otherRotation can use the same multiworld basepatch as rotation, mainly in bank $e2, which is free
+
+
+// unhundo = rotation for AP purposes. technically unhundo is a smaller rom. convenient, just works
+romSize_Unhundo = romSize_Rotation
+copyFromMultiWorldTo_Unhundo = copyFromMultiWorldTo_Rotation
+
 
 romSize_Zfactor = 3*1024*1024 /* 3MiB vanilla */ + 7*0x8000
 
@@ -371,10 +425,61 @@ copyFromMultiWorldTo_Zfactor = [
 visiblePlm_Zfactor =
     { "symbol" : "archipelago_visible_item_plm", "new": "84:FBC0" }
 
-// last symbol thing, again could be improved by reading json symbol data
+// last symbol things, again could be improved by reading json symbol data
 visiblePlmDifference_Rotation = 0x84f870 - 0x84fc20 // ap rotation plm id minus ap vanilla plm id "84:f870" - "84:fc20"
 visiblePlmDifference_otherRotation = visiblePlmDifference_Rotation
+visiblePlmDifference_Unhundo = visiblePlmDifference_Rotation
 
+unhundo_item_received_start = "85:b8a3" // SMBasepatch symbol item_received
+
+// from SMBasepatch box.tbl
+aplettering = {
+    '\'': 0x28fd,
+    '-': 0x28cf,
+    ' ': 0x284e,
+    '!': 0x28ff,
+    '%': 0x280a,
+    ',': 0x28fb,
+    '.': 0x28fa,
+    '?': 0x28fe,
+    '_': 0xe,
+    '0': 0x2809,
+    '1': 0x2800,
+    '2': 0x2801,
+    '3': 0x2802,
+    '4': 0x2803,
+    '5': 0x2804,
+    '6': 0x2805,
+    '7': 0x2806,
+    '8': 0x2807,
+    '9': 0x2808,
+    'A': 0x28e0,
+    'B': 0x28e1,
+    'C': 0x28e2,
+    'D': 0x28e3,
+    'E': 0x28e4,
+    'F': 0x28e5,
+    'G': 0x28e6,
+    'H': 0x28e7,
+    'I': 0x28e8,
+    'J': 0x28e9,
+    'K': 0x28ea,
+    'L': 0x28eb,
+    'M': 0x28ec,
+    'N': 0x28ed,
+    'O': 0x28ee,
+    'P': 0x28ef,
+    'Q': 0x28f0,
+    'R': 0x28f1,
+    'S': 0x28f2,
+    'T': 0x28f3,
+    'U': 0x28f4,
+    'V': 0x28f5,
+    'W': 0x28f6,
+    'X': 0x28f7,
+    'Y': 0x28f8,
+    'Z': 0x28f9,
+}
 // end data region
 
 // allows live modification of a zip file that is *uncompressed* already (basically a .tar in .zip form)

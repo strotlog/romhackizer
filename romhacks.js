@@ -764,6 +764,87 @@ var romhacks = {
     },
     // end otherRotation
 
+    unhundo: {
+
+        sm_to_unhundo_remapping: {
+            // nothing needed
+        },
+
+        patchmain: function ({hasRoms = true, loadedroms = {}} = {}) {
+
+            let itempatches = []
+
+            if (hasRoms) {
+                let springballcount = 0
+
+                for (address of romhacks.offsetsInRomOf100ItemPlms) {
+                    let fromAddress = address
+                    let toAddress
+                    if (('0x' + fromAddress.toString(16)) in romhacks.unhundo.sm_to_unhundo_remapping) {
+                        toAddress = parseInt(romhacks.unhundo.sm_to_unhundo_remapping['0x' + fromAddress.toString(16)])
+                    } else {
+                        toAddress = fromAddress
+                    }
+                    // get the item!
+                    let itemid = loadedroms['rando'].allbytes[fromAddress] + loadedroms['rando'].allbytes[fromAddress+1]*256 // convert plm from little endian
+                    let newitem
+
+                    // check for both types of 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
+                    if (itemid === 0xbae9 || /* new 2023 */ itemid == 0xbad1) {
+                        // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same,
+                        // either may use either of the above itemids in varia depending on version)
+                        // draw empty and delete, see comments on 0xbae9 from rotation, this is a bit hacky
+                        newitem = 0xe0df
+                    } else if (itemid === 0xbaed || /* new 2023 */ itemid == 0xbad5) {
+                        // hidden 'nothing', see comments on 0xbaed from rotation, this is a bit hacky
+                        newitem = 0xef83
+                        itempatches.push({address: toAddress+4, type: 'overwrite',
+                                          bytes: [0x05, 0x20].reverse()})
+                    } else {
+                        newitem = itemid
+                    }
+                    itempatches.push({address: toAddress, type: 'overwrite',
+                                      bytes: [(newitem & 0xff), (newitem >> 8) & 0xff]})
+                    // check for race mode
+                    if (itemid === 0xef03 || itemid === 0xef57 || itemid === 0xefab) {
+                        springballcount++
+                    }
+                    if (springballcount > 5) {
+                        console.log('Error: Cannot read items from a Race-Mode protected rando ROM!!')
+                        return []
+                    }
+                }
+            }
+
+            let patches = []
+
+            if (itempatches.length != 0) {
+                itempatches[0].description = 'copying items from rando rom'
+                patches.push(...itempatches)
+            }
+
+            // items are done. now do a select few code patches that make things suck less!
+            patches.push(...generalpatches.all()) // requires that html has loaded generalpatches.js
+
+            patches.push(...romfeatures.maxAmmoDisplay) // requires that html has loaded romfeatures.js
+            patches.push(...romfeatures.suitPickupsNowPreserveSamusLocation)
+
+            // unhundo-specific code patches
+            patches.push(...romhacks.unhundo.allpatches())
+
+            return patches
+        },
+
+        allpatches: function() {
+            let patches = []
+
+            // no unhundo patches needed for now (except in archipelago, see archipelago.js)
+
+            return patches
+        },
+    },
+    // end unhundo
+
     zfactor: {
         sm_to_zf_mapping: {
         // mapping contributed by ironrusty:

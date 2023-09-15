@@ -75,8 +75,8 @@ function checkForFreespaceConflict(modifications) {
 }
 function checkForOverlappingPatches(modifications) {
     // turn each patch into 2 markers: one for where it begins, one for where it ends. then sort all the markers together and check for double-begins
-    ordered = modifications.map((modification) => [{address: modification.address, type: 'begin' },
-                                                   {address: modification.address + modification.bytes.length, type: 'end'}]
+    ordered = modifications.map((modification) => [{address: modification.address, type: 'begin', length: modification.bytes.length },
+                                                   {address: modification.address + modification.bytes.length, type: 'end', length: modification.bytes.length}]
                                 ).flat().sort((a, b) => {
                                     if (a.address < b.address) { return -1 }
                                     if (a.address > b.address) { return 1 }
@@ -94,6 +94,7 @@ function checkForOverlappingPatches(modifications) {
         }
         if (begunpatches > 1) {
             console.log('patch beginning at 0x' + ordered[i].address.toString(16) + ' overlaps with an earlier patch! all patches examined: ' + JSON.stringify(modifications, stringifyInHex))
+            console.log('the overlapping patch ought to be the one at 0x' + ordered[i-1].address.toString(16) + ' (\'' + ordered[i-1].type + '\'), having length ' + ordered[i-1].length)
             return true // overlap!
         }
     }
@@ -193,10 +194,12 @@ async function updateState() {
             hackname = 'rotation'
         } else if (loadedroms['romhackIps'].allbytes.length == 1079276) {
             hackname = 'otherRotation'
+        } else if (loadedroms['romhackIps'].allbytes.length == 20345) {
+            hackname = 'unhundo'
         } else if (loadedroms['romhackIps'].allbytes.length == 917097) {
             hackname = 'zfactor'
         } else {
-            console.log('Unexpected IPS length: ' + loadedroms['romhackIps'].allbytes.length + ' bytes. Expected 917097 (zfactor) or 550480 (rotation) or 1079276 (otherRotation)')
+            console.log('Unexpected IPS length: ' + loadedroms['romhackIps'].allbytes.length + ' bytes. Expected 917097 (zfactor) or 550480 (rotation) or 1079276 (otherRotation) or 20345 (unhundo)')
             return
         }
         console.log('Detected hack \'' + hackname + '\' based on ips')
@@ -223,6 +226,8 @@ async function updateState() {
                 romhackSize = 3*1024*1024 + 2*0x8000
             } else if (hackname == 'otherRotation') {
                 romhackSize = 4*1024*1024
+            } else if (hackname == 'unhundo') {
+                romhackSize = 3*1024*1024
             } else if (hackname == 'zfactor') {
                 romhackSize = 3*1024*1024 + 5*0x8000
             }
@@ -262,6 +267,20 @@ async function updateState() {
                 applyPatch(patches)
             } else if (hackname == 'otherRotation') {
                 let patches = romhacks.otherRotation.patchmain({hasRoms: true, loadedroms: loadedroms})
+                if (checkForOverlappingPatches(patches)) {
+                    return
+                }
+                if (checkForFreespaceConflict(patches)) {
+                    return
+                }
+                patches = assembleUnambiguousInstructions(patches)
+                if (patches.length === 0) {
+                    return
+                }
+
+                applyPatch(patches)
+            } else if (hackname == 'unhundo') {
+                let patches = romhacks.unhundo.patchmain({hasRoms: true, loadedroms: loadedroms})
                 if (checkForOverlappingPatches(patches)) {
                     return
                 }
@@ -350,6 +369,9 @@ async function archipelagoRidiculum_continued(hackname, compressjs, jsyaml, arch
     if (hackname == 'otherRotation') {
         hacknameBuild = 'rotation' // rotation multiworld basepatch works with otherRotation romhack
     }
+    if (hackname == 'unhundo') {
+        hacknameBuild = 'rotation' // rotation multiworld basepatch works with unhundo romhack
+    }
     let basepatch_ips = await fetchFileAndGetBytes("https://raw.githubusercontent.com/strotlog/SMBasepatch/main/build/romhacks/" + hacknameBuild + "/multiworld-basepatch.ips")
     console.log('fetched basepatch ips')
     let basepatch = readips(basepatch_ips, 'multiworld basepatch ips')
@@ -385,8 +407,8 @@ async function archipelagoRidiculum_continued(hackname, compressjs, jsyaml, arch
         if (localpatches.length === 0) {
             return -1
         }
-    } else if (hackname == 'otherRotation') {
-        localpatches = romhacks.otherRotation.patchmain({hasRoms: false})
+    } else if (hackname == 'unhundo') {
+        localpatches = romhacks.unhundo.patchmain({hasRoms: false})
 
         if (checkForOverlappingPatches(localpatches)) {
             return -1
@@ -449,6 +471,8 @@ async function archipelagoRidiculum_continued(hackname, compressjs, jsyaml, arch
         verb = 'Rotated'
     } else if (hackname == 'otherRotation') {
         verb = 'otherRotated'
+    } else if (hackname == 'unhundo') {
+        verb = 'Unhundoed'
     } else if (hackname == 'zfactor') {
         verb = 'Zfactored'
     }
@@ -460,6 +484,8 @@ async function archipelagoRidiculum_continued(hackname, compressjs, jsyaml, arch
         document.getElementById('divIdRotationNote').style.visibility = 'visible'
     } else if (hackname == 'otherRotation') {
         document.getElementById('divIdOtherRotationNote').style.visibility = 'visible'
+    } else if (hackname == 'unhundo') {
+        document.getElementById('divIdUnhundoNote').style.visibility = 'visible'
     } else if (hackname == 'zfactor') {
         document.getElementById('divIdZfactorNote').style.visibility = 'visible'
     }
@@ -552,13 +578,13 @@ document.addEventListener('DOMContentLoaded', function (event) {
     <p>This is not exactly a randomizer. Instead, it copies the locations of all the items from a <strong><a href="https://varia.run/">VARIA Randomizer</a></strong> ROM seed that you provide. (VARIA itself may include a rotation randomizer soon.) (Other randomizers should be fine.)</p>
     <p>This:</p>
     <ul>
-        <li>For SM: Rotation, applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door; 4. BT wakes; 5. balanced suits; 6. screw attack menuing; 7. speed echoes in heated room; 8. spring change in bounce crash fix; 9. escape-climb softlock fix; 10. down-facing gadora crash fix; 11. max ammo equip screen; 12. suit pickup restores position; 13. faster intro; 14. metal pirates crash fix" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">several code patches</dfn>. Check console log. For otherRotation, a limited subset is applied. For Z-Factor Archipelago, a limited subset is applied, plus Galamoz's ZF Rando patches are fetched and applied, with Gala's generous permission. Beyond these changes, it is exactly like the romhack except the items are moved. Be careful and save!</li>
+        <li>For SM: Rotation, applies <dfn title="1. TBD; 2. vanilla bug patch(es); 3. can always reach Taco tank room & BT's door; 4. BT wakes; 5. balanced suits; 6. screw attack menuing; 7. speed echoes in heated room; 8. spring change in bounce crash fix; 9. escape-climb softlock fix; 10. down-facing gadora crash fix; 11. max ammo equip screen; 12. suit pickup restores position; 13. faster intro; 14. metal pirates crash fix" style="font-style: normal; text-decoration: underline; text-decoration-style: dotted">several code patches</dfn>. Check console log. For otherRotation and Unhundo, a limited subset is applied. For Z-Factor Archipelago, a limited subset is applied, plus Galamoz's ZF Rando patches are fetched and applied, with Gala's generous permission. Beyond these changes, it is exactly like the romhack except the items are moved. Be careful and save!</li>
         <li><strong>Does not ensure the seed is completable.</strong></li>
         <li>Does not prevent most softlocks.</li>
         <li>Will not show errors plainly yet - check your browser's console if a download link doesn't appear.</li>
         <li>Will not actually upload or store anything - it's all in your browser. (This means links generated are very temporary and local to this tab.)</li>
     </ul>
-    <p>by strotlog 2022</p>
+    <p>by strotlog 2022-2023</p>
     <div id='divIdRandoRomArea' style='border: 1px; border-style: dotted' ondrop="event.preventDefault(); addRomFiles('rando', event.dataTransfer.files)">
         <p><h3 style="display: inline">
             Rando ROM
@@ -582,6 +608,7 @@ document.addEventListener('DOMContentLoaded', function (event) {
             <li><strong><a href="https://metroidconstruction.com/hack.php?id=350">Super Metroid: Rotation</a></strong> (Beta 11) by SMILEuser96 or</li>
             <li><strong><a href="https://metroidconstruction.com/hack.php?id=28">Super Metroid: Z-Factor</a></strong> (1.3) by Metaquarius or</li>
             <li><strong><a href="https://metroidconstruction.com/hack.php?id=714">Super Metroid: otherRotation</a></strong> (1.0.1) by BuggMann</li>
+            <li><strong><a href="https://metroidconstruction.com/hack.php?id=665">Unhundred %</a></strong> (0.5) ('Unhundo') by ClockwiseUK</li>
         </ul><input type='file' id='inputIdRomhackIps' style='display:none' onchange="addRomFiles('romhackIps', this.files)" accept=".ips" />
         <input type='button' id='inputIdRomhackIpsButton' value='Browse' onclick="document.getElementById('inputIdRomhackIps').click()"/>
         <span id='spanIdRomhackIpsFilename'>(No file)</span>
@@ -596,6 +623,9 @@ document.addEventListener('DOMContentLoaded', function (event) {
     </div>
     <div id='divIdOtherRotationNote' style='visibility: hidden; font-size: 16px'>
         Enjoy otherRotation romhack by BuggMann.
+    </div>
+    <div id='divIdUnhundoNote' style='visibility: hidden; font-size: 16px'>
+        Enjoy Unhundo romhack by ClockwiseUK.
     </div>
     <div id='divIdZfactorNote' style='visibility: hidden; font-size: 16px'>
         <!-- note, external patches patching doesn't happen for plain sfc patching (which is completely synchronous). so to keep us honest, these messages don't show except in the AP code path. -->
