@@ -458,7 +458,8 @@ async function archipelagoRidiculum_continued(hackname, compressjs, jsyaml, arch
                                                loadedroms['vanilla'].allbytes,
                                                romhacks.offsetsInRomOf100ItemPlms,
                                                hackname,
-                                               (hackname == 'otherRotation' ? romhacks.otherRotation.sm_to_otherRotation_remapping : null),
+                                               (hackname == 'otherRotation' ? romhacks.otherRotation.sm_to_otherRotation_remapping : (
+                                                 hackname == 'unhundo' ? romhacks.unhundo.sm_to_unhundo_remapping : null)),
                                                (hackname == 'zfactor' ? {fromAp: romhacks.zfactor.sm_to_zf_mapping,
                                                                         leaveAsRegularItem: romhacks.zfactor.zf_unmodified_except_sram_bit}
                                                                      : null))

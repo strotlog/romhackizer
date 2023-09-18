@@ -625,7 +625,7 @@ var romhacks = {
         sm_to_otherRotation_remapping: {
             // otherRotation moves the ROM location of 5 plm populations/instance definitions, vs those listed in offsetsInRomOf100ItemPlms:
             // case sensitive--must use lowercase so that lookups work!
-            '0x78404' : '0x7eb56', // bombs plm vanilla -> otherRotation
+            '0x78404' : '0x7eb56', // bombs plm vanilla : otherRotation
             '0x7c2e9' : '0x7ecd8', // ws reserve
             '0x7c2ef' : '0x7ecde', // ws reserve missile
             '0x7c603' : '0x7ee16', // aqueduct missile
@@ -767,7 +767,11 @@ var romhacks = {
     unhundo: {
 
         sm_to_unhundo_remapping: {
-            // nothing needed
+            // unhundo moves the ROM location of 1 plm population/instance definition, vs those listed in offsetsInRomOf100ItemPlms:
+            // case sensitive--must use lowercase so that lookups work!
+            '0x7874c' : '0x7eae6', // blue brin PBs plm vanilla : unhundo
+            // plus *we* move the ROM location of morph ball in the same room. part 1 of 2 of moving it:
+            '0x786de' : '0x7eae0', // morph ball plm vanilla : unhundo-as-customized-by-this-code
         },
 
         patchmain: function ({hasRoms = true, loadedroms = {}} = {}) {
@@ -838,7 +842,96 @@ var romhacks = {
         allpatches: function() {
             let patches = []
 
-            // no unhundo patches needed for now (except in archipelago, see archipelago.js)
+            // solve the morph ball location item not appearing until zebes is asleep, as it may not be a morph ball:
+            // we move the ROM location of morph ball (or whatever item's there at its location now) in morph ball room
+            // part 2 of 2 moving it:
+            // plain unhundo.ips adds a plm population here in free space for its 'zebes awake' state:
+            //
+            //          (several dozen plms' worth of free space 0xff) <-- we will add here
+            // 0x7ea80: scroll plm
+            //          scroll plm
+            //          ...
+            // 0x7eae0: gray door plm <-- we will change here
+            // 0x7eae6: blue brin pb's plm
+            // 0x7eaec: 00, 00 (null terminator)
+            //          (several dozen plms' worth of free space 0xff)
+            //
+            // we'll take advantage of the fact that this plm population is almost the same as that of the default
+            // room state in the hack.
+            // the only differences?
+            // 1) gray door is exclusive to 'zebes awake' state, and
+            // 2) 'zebes awake' state has pb's, no morph. default state has morph, no pb's.
+            // solution:
+            // - point default state to 'zebes awake' state
+            // - put both items in 'zebes awake' state
+            // - move gray door to 6 bytes BEFORE the start of the 'zebes awake' state
+            // - point 'zebes awake' state to the gray door, so it is the only difference between the states
+            // - move morph-showing logic to PLM code
+            patches.push(...[
+                         {address: 0x79ec5, // address of plm population pointer word within state header for room's default state
+                          type: 'overwrite',
+                          description: 'solve morph ball location item not appearing until zebes is asleep',
+                          bytes: [0xea, 0x80].reverse() /* pop. pointer value = 0x7ea80 */},
+                         {address: 0x79edf, // address of plm population pointer word within state header for room's 'zebes awake' state
+                          type: 'overwrite',
+                          bytes: [0xea, 0x7a].reverse() /* pop. pointer value = 0x7ea7a */},
+                         {address: 0x7ea7a,
+                          type: 'freespace',
+                          bytes: [[0xc8, 0x48].reverse() /* gray door plm id */, 0x01, 0x26 /* x, y */, [0x0c, 0x31].reverse() /* plm param */].flat()},
+                         {address: 0x7eae0 + 2, // skip 2 bytes for plm id of whatever is at our new morph ball location (overwritten separately)
+                          type: 'overwrite',
+                          bytes: [0x45, 0x29 /* x, y */, [0x00, 0x1a].reverse() /* plm param */]},
+                         ].flat())
+            patches.push(...[
+                         {address: 0x263fb, // hook morph open plm instruction list
+                          type: 'overwrite',
+                          description: 'new morph ball behavior if you have other items',
+                          bytes: [0xf2, 0x06].reverse()}, // call $84:f206 instead of $84:887C
+                         {address: 0x268a8, // hook morph chozo plm instruction list
+                          type: 'overwrite',
+                          bytes: [0xf2, 0x06].reverse()}, // call $84:f206 instead of $84:887C
+                         {address: 0x26ddc, // hook morph shot block plm instruction list
+                          type: 'overwrite',
+                          bytes: [0xf2, 0x06].reverse()}, // call $84:f206 instead of $84:887C
+                         {address: 0x27200, // $84:f200 : freeze plm forever (instruction list)
+                          type: 'freespace',
+                          bytes: [[0xe0, 0x4f].reverse(), // plm instruction list: draw frame 1
+                                  [0x87, 0x24].reverse(), [0xf2, 0x00].reverse(), // goto draw frame 1 (forever). freezes frame of item, not obtainable
+                                  ].flat()},
+                         {address: 0x2f000, // $85:f000 : set carry if any items, clear carry if only equipment is morph (or nothing). assumes registers are 16-bit
+                          type: 'freespace',
+                          bytes: ['sec', // (remember not to do any addition or this default return value will get cleared!)
+                                  0xaf /* lda.l absolute */, [0x7e, 0x09, 0xc8].reverse(), // $09c8: samus max missiles
+                                  0x0f /* ora.l absolute */, [0x7e, 0x09, 0xcc].reverse(), // $09cc: samus max supers
+                                  0x0f /* ora.l absolute */, [0x7e, 0x09, 0xd0].reverse(), // $09d0: samus max pb's
+                                  0x0f /* ora.l absolute */, [0x7e, 0x09, 0xd4].reverse(), // $09d4: samus max reserve
+                                  0x0f /* ora.l absolute */, [0x7e, 0x09, 0xa8].reverse(), // $09a8: collected beams
+                                  'beq', 1,
+                                  'rtl', // return if any missiles/supers/pb's/beams
+                                  0xaf /* lda.l absolute */, [0x7e, 0x09, 0xa4].reverse(), // $09a4: collected items
+                                  0x89 /* bit imm */, [0xff, 0xfb].reverse(), // ~0x0004
+                                  'beq', 1, // continue iff collected items == 0x0004 (morph and nothing else) or 0
+                                  'rtl',
+                                  0xaf /* lda.l absolute */, [0x7e, 0x09, 0xc4].reverse(), // $09c4: max health
+                                  0x49 /* eor imm */, [0x00, 0x63].reverse(),
+                                  'beq', 1, // continue iff max health == 99
+                                  'rtl',
+                                  'clc', // return carry cleared, indicating 'morph only' condition is satisfied
+                                  'rtl',
+                                  ].flat()},
+                         {address: 0x27206, // $84:f206 : if samus has more than morph, freeze frame, make item unobtainable.
+                                           //            else, do normal check for room argument item set (goto [[Y]] if so),
+                                           //                  vs not set (fall through to next instruction in list if so)
+                                           // use $f206, (pointer) in place of $887C, (pointer)
+                          type: 'freespace',
+                          bytes: ['jsl', [0x85, 0xf0, 0x00].reverse(), // detect loadout using above function
+                                  'bcc', 4,
+                                  0xa0 /* ldy imm */, [0xf2, 0x00].reverse(), // if carry set, goto plm instruction list $84:f200 : freeze plm forever
+                                  'rts',
+                                  0x20 /* jsr */, [0x88, 0x7c].reverse(), // call ($84:)$887C: go to [[Y]] if the room argument item is set
+                                  'rts',
+                                  ].flat()}
+                         ])
 
             return patches
         },
