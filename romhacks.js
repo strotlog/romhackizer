@@ -120,9 +120,19 @@ var romhacks = {
 
                     // check for both types of 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
                     if (itemid === 0xbae9 || /* new 2023 */ itemid == 0xbad1) {
-                        // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same)
-                        // because the varia 'nothing item plm' types do not exist in sm rotation, we have to instead use plm id 0xb62f "Don't make PLM". it's perfectly equivalent anyway!
-                        newitem = 0xb62f
+                        // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same,
+                        //       either may use either of the above itemids in varia depending on version)
+                        // because the varia 'nothing item plm' types do not exist in sm rotation, we avoid
+                        // writing our own and taking up valuable bank $84 space
+                        // instead we commandeer this piece of (open missile) instruction list as if it were
+                        // a plm definition:
+                        // $84:e0df dx $8724, $DFA9
+                        // $84:8724 is a function that simply loads values into registers
+                        //          (normally achieving a 'go to', but if treated as a PLM setup routine, the
+                        //           caller discards Y instead of saving it. thus no-op!)
+                        // what we really need is the instruction list at $84:DFA9, which first writes an empty tile
+                        // (without which i found the speed booster chozo orb still appears), then deletes the PLM
+                        newitem = 0xe0df
                     } else if (itemid === 0xbaed || /* new 2023 */ itemid == 0xbad5) {
                         // 'nothing' shot block item.
                         // set plm id to 0xef83 "Missile tank, shot block" but we'll have it depend on a very special parameter so that it's never there
@@ -643,11 +653,12 @@ var romhacks = {
 
                     // check for both types of 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
                     if (itemid === 0xbae9 || /* new 2023 */ itemid == 0xbad1) {
-                        // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same)
-                        // because the varia 'nothing item plm' types do not exist in sm romhacks, we have to instead use plm id 0xb62f "Don't make PLM". it's perfectly equivalent anyway!
-                        newitem = 0xb62f
+                        // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same,
+                        // either may use either of the above itemids in varia depending on version)
+                        // draw empty and delete, see comments on 0xbae9 from rotation, this is a bit hacky
+                        newitem = 0xe0df
                     } else if (itemid === 0xbaed || /* new 2023 */ itemid == 0xbad5) {
-                        // hidden 'nothing', see comments on 0xbaed from rotation, this is a bit hacky
+                        // hidden 'nothing', see comments on 0xbaed from rotation, this is also a bit hacky
                         newitem = 0xef83
                         itempatches.push({address: toAddress+4, type: 'overwrite',
                                           bytes: [0x05, 0x20].reverse()})
@@ -877,9 +888,10 @@ var romhacks = {
 
                     // check for both types of 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
                     if (itemid === 0xbae9 || /* new 2023 */ itemid == 0xbad1) {
-                        // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same)
-                        // because the varia 'nothing item plm' types do not exist in sm romhacks, we have to instead use plm id 0xb62f "Don't make PLM". it's perfectly equivalent anyway!
-                        newitem = 0xb62f
+                        // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same,
+                        // either may use either of the above itemids in varia depending on version)
+                        // draw empty and delete, see comments on 0xbae9 from rotation, this is a bit hacky
+                        newitem = 0xe0df
                     } else if (itemid === 0xbaed || /* new 2023 */ itemid == 0xbad5) {
                         // hidden 'nothing', see comments on 0xbaed from rotation, this is a bit hacky
                         newitem = 0xef83

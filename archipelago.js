@@ -164,10 +164,10 @@ class archipelagoclass {
                 }
                 // see patchmain in other file for comments detailing PLM codes
                 if (apPlmId == 0xbae9 || apPlmId == 0xbad1) {
-                    // 'nothing' chozo or 'nothing' in the open PLM (convert varia plm 0xbae9 -> vanilla plm 0xb62f)
-                    this.bsdiff_apromhacked.overwrite(newaddress, [0x2f, 0xb6])
+                    // 'nothing' chozo or 'nothing' in the open PLM (convert varia PLM 0xbae9/0xbad1 -> hacky empty PLM 0xe0df)
+                    this.bsdiff_apromhacked.overwrite(newaddress, [0xdf, 0xe0])
                 } else if (apPlmId == 0xbaed || apPlmId == 0xbad5) {
-                    // 'nothing' hidden PLM (convert varia plm 0xbaed -> hackery achieving the same thing)
+                    // 'nothing' hidden PLM (convert varia PLM 0xbaed/0xbad5 -> hackery achieving the same thing)
                     this.bsdiff_apromhacked.overwrite(newaddress, [0x83, 0xef]) // missile shot block PLM 0xef83
                     this.bsdiff_apromhacked.overwrite(newaddress+4, [0x20, 0x05]) // 0x0520 hackery to avoid new PLM (see patchmain comments)
                 } else {
@@ -206,7 +206,7 @@ class archipelagoclass {
                         this.bsdiff_apromhacked.overwrite(newaddress+4, [0x20, 0x05]) // 0x0520 hackery to avoid new PLM (see patchmain comments)
                     } else {
                         // place a 'nothing' visible or chozo PLM
-                        this.bsdiff_apromhacked.overwrite(newaddress, [0x2f, 0xb6]) // vanilla PLM 0xb62f
+                        this.bsdiff_apromhacked.overwrite(newaddress, [0xdf, 0xe0]) // hacky empty PLM 0xe0df
                     }
                 } else if (apPlmId == 0) {
                     console.log('Error: we read PLM value of 0 (should be a ROM pointer) @ AP rom offset 0x' + address.toString(16))
