@@ -119,11 +119,11 @@ var romhacks = {
                     let newitem
 
                     // check for both types of 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
-                    if (itemid === 0xbae9) {
+                    if (itemid === 0xbae9 || /* new 2023 */ itemid == 0xbad1) {
                         // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same)
                         // because the varia 'nothing item plm' types do not exist in sm rotation, we have to instead use plm id 0xb62f "Don't make PLM". it's perfectly equivalent anyway!
                         newitem = 0xb62f
-                    } else if (itemid === 0xbaed) {
+                    } else if (itemid === 0xbaed || /* new 2023 */ itemid == 0xbad5) {
                         // 'nothing' shot block item.
                         // set plm id to 0xef83 "Missile tank, shot block" but we'll have it depend on a very special parameter so that it's never there
                         newitem = 0xef83
@@ -642,11 +642,11 @@ var romhacks = {
                     let newitem
 
                     // check for both types of 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
-                    if (itemid === 0xbae9) {
+                    if (itemid === 0xbae9 || /* new 2023 */ itemid == 0xbad1) {
                         // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same)
                         // because the varia 'nothing item plm' types do not exist in sm romhacks, we have to instead use plm id 0xb62f "Don't make PLM". it's perfectly equivalent anyway!
                         newitem = 0xb62f
-                    } else if (itemid === 0xbaed) {
+                    } else if (itemid === 0xbaed || /* new 2023 */ itemid == 0xbad5) {
                         // hidden 'nothing', see comments on 0xbaed from rotation, this is a bit hacky
                         newitem = 0xef83
                         itempatches.push({address: toAddress+4, type: 'overwrite',
@@ -876,11 +876,11 @@ var romhacks = {
                     let itemid = loadedroms['rando'].allbytes[fromAddress] + loadedroms['rando'].allbytes[fromAddress+1]*256 // convert plm from little endian
 
                     // check for both types of 'nothing item plm' from VARIA rando - see https://github.com/theonlydude/RandomMetroidSolver/blob/master/patches/common/src/nothing_item_plm.asm
-                    if (itemid === 0xbae9) {
+                    if (itemid === 0xbae9 || /* new 2023 */ itemid == 0xbad1) {
                         // 'nothing' chozo item, or, 'nothing' item in the open (they're one and the same)
                         // because the varia 'nothing item plm' types do not exist in sm romhacks, we have to instead use plm id 0xb62f "Don't make PLM". it's perfectly equivalent anyway!
                         newitem = 0xb62f
-                    } else if (itemid === 0xbaed) {
+                    } else if (itemid === 0xbaed || /* new 2023 */ itemid == 0xbad5) {
                         // hidden 'nothing', see comments on 0xbaed from rotation, this is a bit hacky
                         newitem = 0xef83
                         itempatches.push({address: parseInt(romhacks.zfactor.sm_to_zf_mapping[fromAddressString])+4, type: 'overwrite',

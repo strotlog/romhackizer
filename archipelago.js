@@ -85,8 +85,8 @@ class archipelagoclass {
         } else if (0xef7f <= plmid &&
                              plmid <= 0xefcf) {
             hiddenstate = 'hidden'
-        } else if (plmid == 0xbaed) {
-            // 0xbaed varia items are hidden, but NOTE cannot guess whether 0xbae9 varia item is visible vs chozo
+        } else if (plmid == 0xbaed || plmid == 0xbad5) {
+            // 0xbaed varia items are hidden, but NOTE cannot guess whether 0xbae9/0xbad1 varia item is visible vs chozo
             // but this probably isn't neeeded anyway
             hiddenstate = 'hidden'
         } else {
@@ -112,7 +112,7 @@ class archipelagoclass {
             this.offsetsInRomOf100ItemPlms.map(
                 (address) => this.bsdiff_from_ap.read(this.vanillaSm, address, 2)).map(
                 (twobytes) => twobytes[0] + twobytes[1]*256).filter(
-                (ap_plm) => ap_plm != 0xbae9 && ap_plm != 0xbaed /* remove 'nothing' items */).forEach(
+                (ap_plm) => ap_plm != 0xbae9 && ap_plm != 0xbaed && ap_plm != 0xbad1 && ap_plm != 0xbad5 /* remove 'nothing' items */).forEach(
                 function (ap_plm) {
                     if (!(ap_plm in counts)) {
                         counts[ap_plm] = 0
@@ -163,10 +163,10 @@ class archipelagoclass {
                     newaddress = parseInt(this.itemRemapping['0x' + address.toString(16)])
                 }
                 // see patchmain in other file for comments detailing PLM codes
-                if (apPlmId == 0xbae9) {
+                if (apPlmId == 0xbae9 || apPlmId == 0xbad1) {
                     // 'nothing' chozo or 'nothing' in the open PLM (convert varia plm 0xbae9 -> vanilla plm 0xb62f)
                     this.bsdiff_apromhacked.overwrite(newaddress, [0x2f, 0xb6])
-                } else if (apPlmId == 0xbaed) {
+                } else if (apPlmId == 0xbaed || apPlmId == 0xbad5) {
                     // 'nothing' hidden PLM (convert varia plm 0xbaed -> hackery achieving the same thing)
                     this.bsdiff_apromhacked.overwrite(newaddress, [0x83, 0xef]) // missile shot block PLM 0xef83
                     this.bsdiff_apromhacked.overwrite(newaddress+4, [0x20, 0x05]) // 0x0520 hackery to avoid new PLM (see patchmain comments)
@@ -196,9 +196,9 @@ class archipelagoclass {
                     return
                 }
 
-                if (apPlmId == 0xbae9 || apPlmId == 0xbaed) {
+                if (apPlmId == 0xbae9 || apPlmId == 0xbad1 || apPlmId == 0xbaed || apPlmId == 0xbad5) {
                     // we want to copy a 'nothing' item
-                    // we don't care which type of 'nothing' (0xbae9 vs 0xbaed) AP tells us, since that depends only on whether the vanilla/AP location is hidden or not -
+                    // we don't care which type of 'nothing' AP tells us, since that depends only on whether the vanilla/AP location is hidden or not -
                     // rather, we care whether the *romhack* location is hidden or not
                     if (hiddenstate == 'hidden') {
                         // place a 'nothing' hidden PLM
