@@ -207,13 +207,14 @@ async function updateState() {
             console.log('Vanilla SM ROM provided is only ' + loadedroms['vanilla'].allbytes.length + ' bytes, expected ' + 3*1024*1024 + ' (3MB)')
             return
         }
+        // *** the split between apsm functionality and single player (smc/sfc) functionality is here:
         if (loadedroms['rando'].filename.endsWith('.apsm')) {
             if (g_completed) {
                 console.log('Please reload the page before doing Archipelago') // because we need that romhack data to be pristine to read the bsdiff correctly
                 return
             }
             g_completed = true
-            ret = archipelagoRidiculum(hackname)
+            archipelagoRidiculum(hackname)
         } else {
             if (loadedroms['rando'].allbytes.length < 2*1024*1024) {
                 console.log('Rando ROM provided is only ' + loadedroms['rando'].allbytes.length + ' bytes, expected ' + 3*1024*1024 + ' or more')
@@ -281,6 +282,7 @@ async function updateState() {
                 applyPatch(patches)
             } else if (hackname == 'unhundo') {
                 let patches = romhacks.unhundo.patchmain({hasRoms: true, loadedroms: loadedroms})
+                patches.push(...romhacks.unhundo.singlePlayerExtrasWithRoms(loadedroms))
                 if (checkForOverlappingPatches(patches)) {
                     return
                 }

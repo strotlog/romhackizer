@@ -935,6 +935,203 @@ var romhacks = {
 
             return patches
         },
+
+        singlePlayerExtrasWithRoms: function(loadedroms) {
+            // remove anything that didn't appear in the vanilla seed.
+            // for example, no gravity suit in the seed? well you certainly can't put grav back, and you
+            // weren't going to need it to get anywhere on zebes anyway. so start without it.
+            // plus, we make the ammos, as they must, equal to what's in the seed (usually not 230/50/50),
+            // so that you can get down to 0!
+            let energy = 99
+            let reserve = 0
+            let items = 0 // bitmask as in game
+            let beams = 0 // bitmask as in game
+            let missiles = 0
+            let supers = 0
+            let pbs = 0
+
+            for (address of romhacks.offsetsInRomOf100ItemPlms) {
+                let plmid = loadedroms['rando'].allbytes[address] + loadedroms['rando'].allbytes[address+1]*256 // convert plm from little endian
+
+                if (plmid == 0xEED7 || // energy tank
+                    plmid == 0xEF2B ||
+                    plmid == 0xEF7F) {
+
+                    energy += 100
+                }
+                if (plmid == 0xEF27 || // reserve tank
+                    plmid == 0xEF7B ||
+                    plmid == 0xEFCF) {
+
+                    reserve += 100
+                }
+                if (plmid == 0xEEDB || // missile tank
+                    plmid == 0xEF2F ||
+                    plmid == 0xEF83) {
+
+                    missiles += 5
+                }
+                if (plmid == 0xEEDF || // super missile tank
+                    plmid == 0xEF33 ||
+                    plmid == 0xEF87) {
+
+                    supers += 5
+                }
+                if (plmid == 0xEEE3 || // power bomb tank
+                    plmid == 0xEF37 ||
+                    plmid == 0xEF8B) {
+
+                    pbs += 5
+                }
+                if (plmid == 0xEEE7 || // bombs
+                    plmid == 0xEF3B ||
+                    plmid == 0xEF8F) {
+
+                    items |= 0x1000
+                }
+                if (plmid == 0xEEEB || // charge beam
+                    plmid == 0xEF3F ||
+                    plmid == 0xEF93) {
+
+                    beams |= 0x1000
+                }
+                if (plmid == 0xEEEF || // ice beam
+                    plmid == 0xEF43 ||
+                    plmid == 0xEF97) {
+
+                    beams |= 2
+                }
+                if (plmid == 0xEEF3 || // hi-jump
+                    plmid == 0xEF47 ||
+                    plmid == 0xEF9B) {
+
+                    items |= 0x100
+                }
+                if (plmid == 0xEEF7 || // speed booster
+                    plmid == 0xEF4B ||
+                    plmid == 0xEF9F) {
+
+                    items |= 0x2000
+                }
+                if (plmid == 0xEEFB || // wave beam
+                    plmid == 0xEF4F ||
+                    plmid == 0xEFA3) {
+
+                    beams |= 1
+                }
+                if (plmid == 0xEEFF || // spazer
+                    plmid == 0xEF53 ||
+                    plmid == 0xEFA7) {
+
+                    beams |= 4
+                }
+                if (plmid == 0xEF03 || // spring ball
+                    plmid == 0xEF57 ||
+                    plmid == 0xEFAB) {
+
+                    items |= 2
+                }
+                if (plmid == 0xEF07 || // varia suit
+                    plmid == 0xEF5B ||
+                    plmid == 0xEFAF) {
+
+                    items |= 1
+                }
+                if (plmid == 0xEF0B || // gravity suit
+                    plmid == 0xEF5F ||
+                    plmid == 0xEFB3) {
+
+                    items |= 0x20
+                }
+                if (plmid == 0xEF0F || // x-ray scope
+                    plmid == 0xEF63 ||
+                    plmid == 0xEFB7) {
+
+                    items |= 0x8000
+                }
+                if (plmid == 0xEF13 || // plasma beam
+                    plmid == 0xEF67 ||
+                    plmid == 0xEFBB) {
+
+                    beams |= 8
+                }
+                if (plmid == 0xEF17 || // grapple beam
+                    plmid == 0xEF6B ||
+                    plmid == 0xEFBF) {
+
+                    items |= 0x4000
+                }
+                if (plmid == 0xEF1B || // space jump
+                    plmid == 0xEF6F ||
+                    plmid == 0xEFC3) {
+
+                    items |= 0x200
+                }
+                if (plmid == 0xEF1F || // screw attack
+                    plmid == 0xEF73 ||
+                    plmid == 0xEFC7) {
+
+                    items |= 8
+                }
+                if (plmid == 0xEF23 || // morph ball
+                    plmid == 0xEF77 ||
+                    plmid == 0xEFCB) {
+
+                    items |= 4
+                }
+            }
+
+            let beamsEquipped
+            if ((beams & 0xc) == 0xc /* spazer and plasma */) {
+                beamsEquipped = beams & ~0x4 // no spazer
+            } else {
+                beamsEquipped = beams
+            }
+
+            // overwrite unhundo's new save setup routine right where it sets all these values, in function $81:ef1a
+            let extrapatches = []
+            extrapatches.push(...[
+                              {address: 0xef1b,
+                               type: 'overwrite',
+                               description: 'set starting items to sum of items in rando seed (single player)',
+                               bytes: [Math.floor(energy / 256), energy % 256].reverse()},
+                              {address: 0xef24,
+                               type: 'overwrite',
+                               bytes: [Math.floor(missiles / 256), missiles % 256].reverse()},
+                              {address: 0xef2d,
+                               type: 'overwrite',
+                               bytes: [Math.floor(supers / 256), supers % 256].reverse()},
+
+                              {address: 0xef35,
+                               type: 'overwrite',
+                               bytes: ['jsl', [0x81, 0xef, 0x7c].reverse(), // jsl $81:ef7c for pb's (no separate load)
+                                       'nop', 'nop'].flat()},
+                              {address: 0xef78, // $81:ef78 : corrected max/starting pb value in rom
+                               type: 'freespace',
+                               bytes: [Math.floor(pbs / 256), pbs % 256].reverse()},
+                              {address: 0xef7c, // $81:ef7c
+                               type: 'freespace',
+                               bytes: [0xaf /* lda.l absolute */, [0x81, 0xef, 0x78].reverse(), // lda.l $81:ef78 corrected max/starting pb value in rom
+                                       0x8f /* sta.l absolute */, [0x7e, 0x09, 0xce].reverse(), // sta.l pb count
+                                       0x8f /* sta.l absolute */, [0x7e, 0x09, 0xd0].reverse(), // sta.l max pb's
+                                       'rtl'
+                                       ].flat()},
+
+                              {address: 0xef3f,
+                               type: 'overwrite',
+                               bytes: [Math.floor(beams / 256), beams % 256].reverse()},
+                              {address: 0xef45,
+                               type: 'overwrite',
+                               bytes: [Math.floor(beamsEquipped / 256), beamsEquipped % 256].reverse()},
+                              {address: 0xef4b,
+                               type: 'overwrite',
+                               bytes: [Math.floor(items / 256), items % 256].reverse()},
+                              {address: 0xef5a,
+                               type: 'overwrite',
+                               bytes: [Math.floor(reserve / 256), reserve % 256].reverse()},
+                              ])
+            return extrapatches
+        },
     },
     // end unhundo
 
