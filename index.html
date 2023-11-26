@@ -409,6 +409,16 @@ async function archipelagoRidiculum_continued(hackname, compressjs, jsyaml, arch
         if (localpatches.length === 0) {
             return -1
         }
+    } else if (hackname == 'otherRotation') {
+        localpatches = romhacks.otherRotation.patchmain({hasRoms: false})
+
+        if (checkForOverlappingPatches(localpatches)) {
+            return -1
+        }
+        localpatches = assembleUnambiguousInstructions(localpatches)
+        if (localpatches.length === 0) {
+            return -1
+        }
     } else if (hackname == 'unhundo') {
         localpatches = romhacks.unhundo.patchmain({hasRoms: false})
 
